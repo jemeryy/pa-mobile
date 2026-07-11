@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#111318">
+<title>PA</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
+    --card: #f6f7f9; --accent: #2563eb; --accent-fg: #ffffff; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318; --fg: #e7e9ee; --muted: #9aa2b1; --line: #262b36;
+      --card: #1a1e27; --accent: #4f8cff; --accent-fg: #0b1020; --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%; }
+  header { position: sticky; top: 0; background: var(--bg); z-index: 5;
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line); }
+  header .title { font-weight: 650; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+  main { padding: 16px; max-width: 760px; margin: 0 auto; padding-bottom: 60px; }
+  button { border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    border-radius: 8px; padding: 7px 14px; font-size: 14px; font-weight: 550; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  a { color: var(--accent); text-decoration: none; }
+  .list a { display: block; padding: 14px 16px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px;
+    color: var(--fg); font-weight: 550; }
+  .list a small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  /* rendered markdown */
+  #md h1 { font-size: 24px; line-height: 1.25; } #md h2 { font-size: 20px; margin-top: 28px; }
+  #md h3 { font-size: 17px; } #md img { max-width: 100%; }
+  #md pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; overflow-x: auto; font-size: 13px; }
+  #md code { background: var(--card); padding: 1px 5px; border-radius: 5px; font-size: 14px; }
+  #md pre code { background: none; padding: 0; }
+  #md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  #md th, #md td { border: 1px solid var(--line); padding: 6px 10px; font-size: 14px; }
+  #md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  #md li { margin: 3px 0; }
+  #md input[type=checkbox] { width: 18px; height: 18px; margin-right: 6px; vertical-align: -4px; accent-color: var(--accent); }
+  #md li:has(> input:checked), #md li:has(> p > input:checked) { color: var(--muted); }
+  textarea { width: 100%; height: 70vh; background: var(--card); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+    font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  input[type=password], input[type=text] { width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); font-size: 15px; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 20px;
+    font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .err { color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <button id="back" onclick="goBack()" style="display:none">&#8249;</button>
+  <div class="title" id="title">PA</div>
+  <button id="editBtn" style="display:none">Edit</button>
+</header>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+
+<script>
+const REPO = 'jemeryy/personal-assistant';
+const API = 'https://api.github.com/repos/' + REPO + '/contents/';
+const $ = id => document.getElementById(id);
+let token = localStorage.getItem('pa_token') || '';
+let cur = { path: '', text: '', sha: '' };
+
+function toast(msg) {
+  $('toast').textContent = msg; $('toast').classList.add('show');
+  setTimeout(() => $('toast').classList.remove('show'), 2200);
+}
+
+async function gh(path, opts = {}) {
+  opts.headers = Object.assign({
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/vnd.github+json',
+  }, opts.headers || {});
+  const r = await fetch(API + encodeURI(path).replace(/#/g, '%23') + '?ref=main&t=' + Date.now(), opts);
+  if (r.status === 401) { localStorage.removeItem('pa_token'); token = ''; route(); throw new Error('bad token'); }
+  if (!r.ok && r.status !== 409) throw new Error('GitHub ' + r.status + ' on ' + path);
+  return r;
+}
+
+function b64decode(b64) {
+  const bin = atob(b64.replace(/\n/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function b64encode(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+
+async function loadFile(path) {
+  const j = await (await gh(path)).json();
+  return { path, sha: j.sha, text: b64decode(j.content) };
+}
+
+async function saveFile(path, text, sha, msg) {
+  const r = await gh(path, { method: 'PUT', body: JSON.stringify({
+    message: msg || ('phone: edit ' + path), content: b64encode(text), sha, branch: 'main' }) });
+  if (r.status === 409) { toast('File changed elsewhere. Reopening latest.'); openPage(path); return null; }
+  return (await r.json()).content.sha;
+}
+
+/* ---------- views ---------- */
+
+function setHeader(title, showBack, showEdit) {
+  $('title').textContent = title;
+  $('back').style.display = showBack ? '' : 'none';
+  $('editBtn').style.display = showEdit ? '' : 'none';
+}
+function goBack() { history.length > 1 ? history.back() : (location.hash = ''); }
+
+function tokenView() {
+  setHeader('PA setup', false, false);
+  $('main').innerHTML = `
+    <p>Paste a GitHub fine-grained token with <b>Contents read/write</b> on <code>${REPO}</code>.</p>
+    <p class="muted">github.com &rarr; Settings &rarr; Developer settings &rarr; Fine-grained tokens.
+    Stored only on this device.</p>
+    <input type="password" id="tok" placeholder="github_pat_...">
+    <p><button class="primary" onclick="saveTok()">Save</button></p>`;
+}
+function saveTok() {
+  token = $('tok').value.trim();
+  if (!token) return;
+  localStorage.setItem('pa_token', token); route();
+}
+
+async function homeView() {
+  setHeader('PA', false, false);
+  $('main').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const pages = JSON.parse((await loadFile('phone/pages.json')).text);
+    $('main').innerHTML = '<div class="list">' + pages.map(p =>
+      `<a href="#/p/${encodeURIComponent(p.path)}">${p.title}<small>${p.path}</small></a>`).join('') + '</div>';
+  } catch (e) { $('main').innerHTML = `<p class="err">${e.message}</p>`; }
+}
+
+async function dirView(path, entries) {
+  setHeader(path.split('/').pop() || path, true, false);
+  const visible = entries.filter(e =>
+    !e.name.startsWith('.') && !e.name.startsWith('_') &&
+    (e.type === 'dir' || e.name.endsWith('.md')));
+  visible.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
+  $('main').innerHTML = '<div class="list">' + visible.map(e =>
+    `<a href="#/p/${encodeURIComponent(e.path)}">${e.type === 'dir' ? '&#128193; ' : ''}${e.name.replace(/\.md$/, '')}</a>`).join('') + '</div>'
+    || '<p class="muted">Empty.</p>';
+}
+
+async function openPage(path) {
+  setHeader(path.split('/').pop(), true, false);
+  $('main').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const j = await (await gh(path)).json();
+    if (Array.isArray(j)) return dirView(path, j);
+    cur = { path, sha: j.sha, text: b64decode(j.content) };
+    if (!path.endsWith('.md')) return editView(path, true);
+    setHeader(path.split('/').pop().replace(/\.md$/, ''), true, true);
+    $('editBtn').onclick = () => { location.hash = '#/e/' + encodeURIComponent(path); };
+    $('main').innerHTML = '<div id="md">' + marked.parse(cur.text, { gfm: true, breaks: false }) + '</div>';
+    wireCheckboxes();
+  } catch (e) { $('main').innerHTML = `<p class="err">${e.message}</p>`; }
+}
+
+/* tappable task-list checkboxes: toggle nth marker in source, commit */
+function wireCheckboxes() {
+  const boxes = [...$('main').querySelectorAll('input[type=checkbox]')];
+  boxes.forEach((box, i) => {
+    box.disabled = false;
+    box.onchange = async () => {
+      boxes.forEach(b => b.disabled = true);
+      const re = /((?:^|\n)\s*(?:[-*+]|\d+\.)\s+\[)( |x|X)(\])/g;
+      let n = -1;
+      const next = cur.text.replace(re, (m, a, state, c) => {
+        n++;
+        return n === i ? a + (state === ' ' ? 'x' : ' ') + c : m;
+      });
+      if (n < i) { toast('Could not match checkbox'); boxes.forEach(b => b.disabled = false); return; }
+      try {
+        const sha = await saveFile(cur.path, next, cur.sha, 'phone: toggle task in ' + cur.path);
+        if (sha) { cur.text = next; cur.sha = sha; toast('Saved'); boxes.forEach(b => b.disabled = false); }
+      } catch (e) { toast('Save failed: ' + e.message); boxes.forEach(b => b.disabled = false); }
+    };
+  });
+}
+
+function editView(path, readOpen) {
+  setHeader('Edit: ' + path.split('/').pop(), true, false);
+  $('main').innerHTML = `
+    <textarea id="ta" spellcheck="false"></textarea>
+    <p style="display:flex;gap:8px">
+      <button class="primary" onclick="doSave()">Save</button>
+      <button onclick="goBack()">Cancel</button>
+    </p>`;
+  $('ta').value = cur.text;
+}
+async function doSave() {
+  const text = $('ta').value;
+  try {
+    const sha = await saveFile(cur.path, text, cur.sha);
+    if (sha) { cur.text = text; cur.sha = sha; toast('Saved'); goBack(); }
+  } catch (e) { toast('Save failed: ' + e.message); }
+}
+
+/* ---------- router ---------- */
+async function route() {
+  if (!token) return tokenView();
+  const h = decodeURIComponent(location.hash);
+  if (h.startsWith('#/e/')) {
+    const path = h.slice(4);
+    if (cur.path !== path) cur = await loadFile(path);
+    return editView(path);
+  }
+  if (h.startsWith('#/p/')) return openPage(h.slice(4));
+  return homeView();
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
