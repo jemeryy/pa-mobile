@@ -2,97 +2,329 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<meta name="theme-color" content="#111318">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#191919" media="(prefers-color-scheme: dark)">
 <title>PA Mobile</title>
 <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
-    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
-    --card: #f6f7f9; --accent: #2563eb; --accent-fg: #ffffff; --danger: #dc2626;
+    --bg: #ffffff; --surface: #f7f7f5; --surface2: #efefed;
+    --ink: #1f1f1e; --muted: #6f6e69; --line: #e9e9e7;
+    --accent: #2383e2; --accent-soft: #e7f0fa; --accent-ink: #ffffff;
+    --danger: #d44c47; --ok: #448361;
+    --shadow: 0 1px 2px rgba(0,0,0,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111318; --fg: #e7e9ee; --muted: #9aa2b1; --line: #262b36;
-      --card: #1a1e27; --accent: #4f8cff; --accent-fg: #0b1020; --danger: #f87171;
+      --bg: #191919; --surface: #202020; --surface2: #2a2a28;
+      --ink: #e8e8e6; --muted: #a3a29d; --line: #2e2e2c;
+      --accent: #4f9fe0; --accent-soft: #1d2b38; --accent-ink: #0e1116;
+      --shadow: none;
     }
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
-    -webkit-text-size-adjust: 100%; }
-  header { position: sticky; top: 0; background: var(--bg); z-index: 5;
-    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-    border-bottom: 1px solid var(--line); }
-  header .title { font-weight: 650; flex: 1; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
-  main { padding: 16px; max-width: 760px; margin: 0 auto; padding-bottom: 60px; }
-  button { border: 1px solid var(--line); background: var(--card); color: var(--fg);
-    border-radius: 8px; padding: 7px 14px; font-size: 14px; font-weight: 550; }
-  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); min-height: 100%;
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  button { font: inherit; cursor: pointer; }
   a { color: var(--accent); text-decoration: none; }
-  .list a { display: block; padding: 14px 16px; background: var(--card);
-    border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px;
-    color: var(--fg); font-weight: 550; }
-  .list a small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
-  .muted { color: var(--muted); font-size: 13px; }
-  /* rendered markdown */
-  #md h1 { font-size: 24px; line-height: 1.25; } #md h2 { font-size: 20px; margin-top: 28px; }
-  #md h3 { font-size: 17px; } #md img { max-width: 100%; }
-  #md pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 10px; overflow-x: auto; font-size: 13px; }
-  #md code { background: var(--card); padding: 1px 5px; border-radius: 5px; font-size: 14px; }
-  #md pre code { background: none; padding: 0; }
-  #md table { border-collapse: collapse; display: block; overflow-x: auto; }
-  #md th, #md td { border: 1px solid var(--line); padding: 6px 10px; font-size: 14px; }
-  #md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
-  #md li { margin: 3px 0; }
-  #md input[type=checkbox] { width: 18px; height: 18px; margin-right: 6px; vertical-align: -4px; accent-color: var(--accent); }
-  #md li:has(> input:checked), #md li:has(> p > input:checked) { color: var(--muted); }
-  textarea { width: 100%; height: 70vh; background: var(--card); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 10px; padding: 12px;
-    font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; }
-  input[type=password], input[type=text] { width: 100%; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--card); color: var(--fg); font-size: 15px; }
-  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 20px;
-    font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+
+  /* ---------- shell ---------- */
+  header {
+    position: sticky; top: 0; z-index: 30; background: var(--bg);
+    display: flex; align-items: center; gap: 4px; padding: 10px 12px;
+    border-bottom: 1px solid var(--line); min-height: 52px;
+  }
+  header .title { font-weight: 650; flex: 1; font-size: 16px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border: none; background: none; color: var(--ink);
+    border-radius: 8px; flex-shrink: 0; transition: background .15s ease-out;
+  }
+  .iconbtn:active { background: var(--surface2); }
+  .iconbtn svg { width: 21px; height: 21px; }
+  .txtbtn {
+    border: none; background: none; color: var(--accent); font-weight: 600;
+    font-size: 15px; padding: 8px 10px; border-radius: 8px; flex-shrink: 0;
+  }
+  .txtbtn:active { background: var(--accent-soft); }
+
+  main { max-width: 720px; margin: 0 auto; padding: 16px;
+    padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+  nav#tabbar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+    display: flex; background: var(--bg); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #tabbar a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 8px 0 6px; color: var(--muted); font-size: 11px; font-weight: 550;
+  }
+  #tabbar a svg { width: 23px; height: 23px; }
+  #tabbar a.on { color: var(--accent); }
+
+  /* ---------- shared bits ---------- */
+  .card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  .rowlist { border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    background: var(--bg); box-shadow: var(--shadow); }
+  .rowlist > * { display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 13px 14px; border: none; border-bottom: 1px solid var(--line);
+    background: none; color: var(--ink); font-size: 15.5px; font-weight: 500;
+    text-align: left; transition: background .15s ease-out; }
+  .rowlist > *:last-child { border-bottom: none; }
+  .rowlist > *:active { background: var(--surface); }
+  .rowlist .ric { font-size: 19px; width: 26px; text-align: center; flex-shrink: 0; }
+  .rowlist .rtx { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rowlist .chev { color: var(--muted); flex-shrink: 0; opacity: .6; }
+  .sect { font-size: 13px; font-weight: 650; color: var(--muted);
+    margin: 22px 4px 8px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .err { color: var(--danger); font-size: 14px; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 20px; font-size: 14.5px; }
+  .primary {
+    background: var(--accent); color: var(--accent-ink); border: none;
+    border-radius: 8px; padding: 9px 18px; font-weight: 600; font-size: 15px;
+  }
+  .ghost { background: none; border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 9px 16px; font-weight: 550; font-size: 15px; }
+  .ghost.danger { color: var(--danger); }
+  input[type=text], input[type=password], input[type=date], input[type=time], textarea {
+    width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 16px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  input:focus-visible, textarea:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  textarea { resize: none; line-height: 1.55; font-family: inherit; }
+  .skel { border-radius: 10px; background: var(--surface2); height: 46px;
+    margin-bottom: 8px; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+  .toast { position: fixed; bottom: calc(76px + env(safe-area-inset-bottom));
+    left: 50%; transform: translateX(-50%); z-index: 60;
+    background: var(--ink); color: var(--bg); padding: 9px 18px; border-radius: 20px;
+    font-size: 13.5px; opacity: 0; transition: opacity .2s ease-out; pointer-events: none;
+    max-width: 86vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .toast.show { opacity: 1; }
-  .err { color: var(--danger); }
+
+  /* ---------- home ---------- */
+  .greet { font-size: 24px; font-weight: 700; margin: 6px 4px 2px; letter-spacing: -.01em; }
+  .gdate { color: var(--muted); font-size: 14px; margin: 0 4px 18px; }
+  .today .tev { display: flex; gap: 10px; padding: 5px 0; font-size: 14.5px; align-items: baseline; }
+  .today .tev .tt { color: var(--muted); font-variant-numeric: tabular-nums;
+    flex-shrink: 0; width: 74px; font-size: 13px; }
+  .today .thead { display: flex; align-items: center; gap: 8px; font-weight: 650;
+    font-size: 14px; margin-bottom: 6px; }
+  .today .thead svg { width: 17px; height: 17px; color: var(--accent); }
+  .tasksum { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px;
+    font-size: 14.5px; }
+
+  /* ---------- document (block editor) ---------- */
+  #doc .blk { border-radius: 8px; padding: 2px 8px; margin: 0 -8px; position: relative;
+    transition: background .15s ease-out; }
+  #doc .blk:active:not(.editing) { background: var(--surface); }
+  #doc h1 { font-size: 25px; line-height: 1.25; margin: 18px 0 6px; letter-spacing: -.01em; }
+  #doc h2 { font-size: 20px; margin: 22px 0 4px; }
+  #doc h3 { font-size: 17px; margin: 18px 0 2px; }
+  #doc p { margin: 8px 0; }
+  #doc img { max-width: 100%; border-radius: 8px; }
+  #doc pre { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; overflow-x: auto; font-size: 13px; }
+  #doc code { background: var(--surface2); padding: 1px 5px; border-radius: 5px; font-size: 13.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  #doc pre code { background: none; padding: 0; }
+  #doc table { border-collapse: collapse; display: block; overflow-x: auto; margin: 8px 0; }
+  #doc th, #doc td { border: 1px solid var(--line); padding: 6px 10px; font-size: 14px; }
+  #doc blockquote { margin: 8px 0; padding: 2px 0 2px 12px;
+    border-left: 3px solid var(--line); color: var(--muted); }
+  #doc ul, #doc ol { margin: 0; padding-left: 26px; }
+  #doc li { margin: 4px 0; }
+  #doc li::marker { color: var(--muted); }
+  #doc ul.cklist { list-style: none; padding-left: 2px; }
+  #doc input[type=checkbox] { width: 19px; height: 19px; margin: 0 8px 0 0;
+    vertical-align: -4px; accent-color: var(--accent); }
+  #doc li.done { color: var(--muted); text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent); }
+  #doc .additem { display: flex; align-items: center; gap: 8px; color: var(--muted);
+    background: none; border: none; padding: 6px 8px; font-size: 14px; margin-left: -6px;
+    opacity: .75; }
+  #doc .additem svg { width: 16px; height: 16px; }
+  .blkedit textarea { min-height: 44px; }
+  .blkedit .ebar { display: flex; gap: 8px; margin: 8px 0 6px; align-items: center; }
+  .blkedit .ebar .sp { flex: 1; }
+  .addblock { display: flex; align-items: center; gap: 8px; color: var(--muted);
+    background: none; border: none; padding: 10px 8px; font-size: 14.5px; margin-top: 10px; }
+  .addblock svg { width: 18px; height: 18px; }
+
+  /* ---------- udemy script view ---------- */
+  .u-tot { position: sticky; top: 53px; z-index: 20; background: var(--bg);
+    padding: 8px 4px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums; display: flex; gap: 6px; align-items: center; }
+  .u-tot b { color: var(--ink); }
+  .u-blk { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .u-mark { display: inline-block; font: 12px ui-monospace, Menlo, Consolas, monospace;
+    background: var(--surface2); border-radius: 5px; padding: 3px 9px; color: var(--muted); }
+  .u-mark.demo { color: var(--accent); background: var(--accent-soft); }
+  .u-stats { font-size: 12px; color: var(--muted); margin-left: 8px;
+    font-variant-numeric: tabular-nums; }
+  .u-lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--muted); font-weight: 650; margin: 12px 0 4px; }
+  .u-lbl.anim { color: var(--accent); }
+  .u-blk textarea { font-size: 15px; }
+  .u-blk textarea.mono { font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    color: var(--muted); }
+  .board { aspect-ratio: 16/9; background: #17181b; color: #f2f2ef;
+    border: 1px solid #2c2d31; border-radius: 8px; margin-top: 10px;
+    padding: 5% 6%; display: flex; flex-direction: column; justify-content: center;
+    overflow: hidden; line-height: 1.5;
+    font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+    font-size: clamp(10px, 3vw, 14px); }
+  .board .b-kicker { font-size: .68em; letter-spacing: .12em; text-transform: uppercase;
+    color: #8f939b; margin-bottom: .9em; font-family: -apple-system, "Segoe UI", sans-serif; }
+  .board .v-line { margin: .3em 0; }
+  .board .v-line:nth-child(5n+2) { color: #f2f2ef; }
+  .board .v-line:nth-child(5n+3) { color: #ffd166; }
+  .board .v-line:nth-child(5n+4) { color: #7fd8c8; }
+  .board .v-line:nth-child(5n)   { color: #ff9e7d; }
+  .board .v-line:nth-child(5n+1) { color: #9ecbff; }
+  .screen { aspect-ratio: 16/9; background: #23282c; color: #d7dde1; border-radius: 8px;
+    margin-top: 10px; overflow: hidden; display: flex; flex-direction: column;
+    font-size: clamp(9px, 2.8vw, 13px); }
+  .screen .chrome { background: #31383d; padding: .5em .9em; font-size: .8em; color: #9aa5ac;
+    display: flex; gap: .5em; align-items: center; flex-shrink: 0; }
+  .screen .chrome i { width: .7em; height: .7em; border-radius: 50%; background: #57646c; }
+  .screen .body { padding: .9em 1.1em; overflow: hidden; line-height: 1.5; }
+  .u-prose { padding: 10px 0; }
+  .u-prose summary { color: var(--muted); font-size: 13px; font-weight: 600; padding: 4px 0; }
+  .savebar { position: fixed; left: 0; right: 0; z-index: 40;
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    background: var(--bg); border-top: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+  .savebar .msg { flex: 1; font-size: 13.5px; color: var(--muted); }
+  .banner { background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-bottom: 14px; }
+  .banner .brow { display: flex; gap: 10px; margin-top: 10px; }
+
+  /* ---------- calendar / tasks ---------- */
+  .dayhead { font-size: 14px; font-weight: 650; margin: 20px 4px 6px; }
+  .dayhead small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .dayhead.today { color: var(--accent); }
+  .ev { display: flex; gap: 12px; padding: 11px 14px; align-items: baseline; }
+  .ev .et { width: 76px; flex-shrink: 0; color: var(--muted); font-size: 13px;
+    font-variant-numeric: tabular-nums; line-height: 1.4; }
+  .ev .es { flex: 1; font-weight: 500; font-size: 15px; }
+  .ev .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    flex-shrink: 0; align-self: center; }
+  .task { display: flex; gap: 12px; padding: 12px 14px; align-items: flex-start;
+    transition: opacity .25s ease-out, transform .25s ease-out; }
+  .task.gone { opacity: 0; transform: translateX(12px); }
+  .task .tk { width: 21px; height: 21px; border-radius: 50%; border: 1.5px solid var(--muted);
+    background: none; flex-shrink: 0; margin-top: 1px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; color: transparent; }
+  .task .tk svg { width: 13px; height: 13px; }
+  .task .tk:active { border-color: var(--accent); color: var(--accent); }
+  .task .tbody { flex: 1; min-width: 0; }
+  .task .ttl { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .task .due { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+  .task .due.over { color: var(--danger); font-weight: 600; }
+  .task .tnotes { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .addform { display: flex; flex-direction: column; gap: 10px; }
+  .addform .frow { display: flex; gap: 10px; align-items: center; }
+  .addform .frow > * { flex: 1; }
+  .addform .frow label { flex: 0 0 auto; font-size: 14px; color: var(--muted); }
+  .chips { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; padding: 2px; }
+  .chips button { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 16px; padding: 6px 14px; font-size: 13.5px; font-weight: 550;
+    white-space: nowrap; }
+  .chips button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .connect { text-align: center; padding: 26px 18px; }
+  .connect p { margin: 0 0 14px; color: var(--muted); font-size: 14.5px; }
+
+  /* ---------- settings ---------- */
+  .set .card h3 { margin: 0 0 4px; font-size: 15.5px; }
+  .set .card p { margin: 4px 0 10px; color: var(--muted); font-size: 13.5px; }
+  .set .stat { font-size: 13.5px; margin-top: 8px; }
+  .set .stat.ok { color: var(--ok); }
 </style>
 </head>
 <body>
 <header>
-  <button id="back" onclick="goBack()" style="display:none">&#8249;</button>
-  <div class="title" id="title">PA Mobile</div>
-  <button id="editBtn" style="display:none">Edit</button>
+  <button class="iconbtn" id="hback" style="display:none" aria-label="Back"></button>
+  <div class="title" id="htitle">PA Mobile</div>
+  <span id="hactions" style="display:flex"></span>
 </header>
 <main id="main"></main>
+<nav id="tabbar"></nav>
 <div class="toast" id="toast"></div>
 
 <script>
-const REPO = 'jemeryy/personal-assistant';
-const API = 'https://api.github.com/repos/' + REPO + '/contents/';
+'use strict';
+/* =============== utilities =============== */
 const $ = id => document.getElementById(id);
-let token = localStorage.getItem('pa_token') || '';
-let cur = { path: '', text: '', sha: '' };
-
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const ICONS = {
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.8 12 3.5l9 7.3"/><path d="M5.5 9.5V20.5h13V9.5"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M8 2.8V6M16 2.8V6"/></svg>',
+  tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.3 12.3l2.5 2.5 4.9-5.4"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08A1.7 1.7 0 0 0 10.1 3.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08c.26.63.87 1.05 1.56 1.06H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.05z"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7m3 0v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+};
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function toast(msg) {
   $('toast').textContent = msg; $('toast').classList.add('show');
-  setTimeout(() => $('toast').classList.remove('show'), 2200);
+  clearTimeout(toast._t); toast._t = setTimeout(() => $('toast').classList.remove('show'), 2400);
 }
+function pad(n) { return String(n).padStart(2, '0'); }
+function dkey(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+function fmtTime(d) {
+  let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am';
+  h = h % 12 || 12; return h + (m ? ':' + pad(m) : '') + ap;
+}
+function dayLabel(d) {
+  const t = new Date(); const tm = new Date(); tm.setDate(t.getDate()+1);
+  if (dkey(d) === dkey(t)) return 'Today';
+  if (dkey(d) === dkey(tm)) return 'Tomorrow';
+  return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+}
+function skels(n) { return Array.from({length:n}, () => '<div class="skel"></div>').join(''); }
 
+/* =============== state =============== */
+const DEMO = new URLSearchParams(location.search).has('demo');
+const REPO = 'jemeryy/personal-assistant';
+const API = 'https://api.github.com/repos/' + REPO + '/contents/';
+const GSCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks';
+let token = localStorage.getItem('pa_token') || '';
+let gcid = localStorage.getItem('pa_gcid') || '';
+let gtok = JSON.parse(localStorage.getItem('pa_gtok') || 'null');
+let cur = { path: '', text: '', sha: '' };   // currently open repo file
+
+/* =============== GitHub layer =============== */
 async function gh(path, opts = {}) {
   opts.headers = Object.assign({
     'Authorization': 'Bearer ' + token,
     'Accept': 'application/vnd.github+json',
   }, opts.headers || {});
   const r = await fetch(API + encodeURI(path).replace(/#/g, '%23') + '?ref=main&t=' + Date.now(), opts);
-  if (r.status === 401) { localStorage.removeItem('pa_token'); token = ''; route(); throw new Error('bad token'); }
+  if (r.status === 401) { localStorage.removeItem('pa_token'); token = ''; route(); throw new Error('GitHub token rejected'); }
   if (!r.ok && r.status !== 409) throw new Error('GitHub ' + r.status + ' on ' + path);
   return r;
 }
-
 function b64decode(b64) {
   const bin = atob(b64.replace(/\n/g, ''));
   const bytes = new Uint8Array(bin.length);
@@ -106,132 +338,869 @@ function b64encode(text) {
     bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
   return btoa(bin);
 }
-
+async function ghGet(path) { return (await gh(path)).json(); }   // file obj or dir array
 async function loadFile(path) {
-  const j = await (await gh(path)).json();
+  const j = await ghGet(path);
   return { path, sha: j.sha, text: b64decode(j.content) };
 }
-
+/* returns new sha, or null on conflict (409) */
 async function saveFile(path, text, sha, msg) {
   const r = await gh(path, { method: 'PUT', body: JSON.stringify({
     message: msg || ('phone: edit ' + path), content: b64encode(text), sha, branch: 'main' }) });
-  if (r.status === 409) { toast('File changed elsewhere. Reopening latest.'); openPage(path); return null; }
+  if (r.status === 409) return null;
   return (await r.json()).content.sha;
 }
 
-/* ---------- views ---------- */
-
-function setHeader(title, showBack, showEdit) {
-  $('title').textContent = title;
-  $('back').style.display = showBack ? '' : 'none';
-  $('editBtn').style.display = showEdit ? '' : 'none';
+/* =============== header / tabbar / router =============== */
+function setHeader(title, opts = {}) {
+  $('htitle').textContent = title;
+  const back = $('hback');
+  back.style.display = opts.back ? '' : 'none';
+  back.innerHTML = ICONS.back;
+  back.onclick = () => history.length > 1 ? history.back() : (location.hash = '');
+  const act = $('hactions'); act.innerHTML = '';
+  (opts.actions || []).forEach(a => {
+    const b = document.createElement('button');
+    if (a.icon) { b.className = 'iconbtn'; b.innerHTML = ICONS[a.icon]; b.setAttribute('aria-label', a.label || a.icon); }
+    else { b.className = 'txtbtn'; b.textContent = a.label; }
+    b.onclick = a.fn; act.appendChild(b);
+  });
 }
-function goBack() { history.length > 1 ? history.back() : (location.hash = ''); }
+function drawTabs() {
+  const h = location.hash;
+  const on = h.startsWith('#/cal') ? 'cal' : h.startsWith('#/tasks') ? 'tasks' : 'home';
+  $('tabbar').innerHTML = [
+    ['home', '', 'Home'], ['cal', '#/cal', 'Calendar'], ['tasks', '#/tasks', 'Tasks'],
+  ].map(([k, href, lbl]) =>
+    `<a href="${href || '#'}" class="${on === k ? 'on' : ''}">${ICONS[k === 'cal' ? 'cal' : k]}${lbl}</a>`
+  ).join('');
+}
+const UDEMY_RE = /^projects\/udemy-course\/scripts\/[^/]+\.md$/;
+let leaveGuard = null;   // {check, dirty, hash} set by views with unsaved state
+let suppressRoute = false;
+async function route() {
+  if (suppressRoute) { suppressRoute = false; return; }
+  if (leaveGuard && !leaveGuard.check()) {
+    suppressRoute = true; location.hash = leaveGuard.hash; return;
+  }
+  leaveGuard = null;
+  drawTabs();
+  window.scrollTo(0, 0);
+  if (!token && !DEMO) return tokenView();
+  const h = decodeURIComponent(location.hash);
+  try {
+    if (h.startsWith('#/raw/')) return await rawView(h.slice(6));
+    if (h.startsWith('#/p/')) {
+      const path = h.slice(4);
+      if (UDEMY_RE.test(path)) return await udemyView(path);
+      return await openPage(path);
+    }
+    if (h.startsWith('#/cal')) return await calView();
+    if (h.startsWith('#/tasks')) return await tasksView();
+    if (h.startsWith('#/settings')) return settingsView();
+    return await homeView();
+  } catch (e) { $('main').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+window.addEventListener('hashchange', route);
+window.addEventListener('beforeunload', e => { if (leaveGuard && leaveGuard.dirty()) e.preventDefault(); });
 
+/* =============== first-run: GitHub token =============== */
 function tokenView() {
-  setHeader('PA Mobile setup', false, false);
+  setHeader('Welcome');
   $('main').innerHTML = `
-    <p>Paste a GitHub fine-grained token with <b>Contents read/write</b> on <code>${REPO}</code>.</p>
-    <p class="muted">github.com &rarr; Settings &rarr; Developer settings &rarr; Fine-grained tokens.
-    Stored only on this device.</p>
-    <input type="password" id="tok" placeholder="github_pat_...">
-    <p><button class="primary" onclick="saveTok()">Save</button></p>`;
+    <div class="card connect">
+      <h3 style="margin:0 0 8px">Connect to your workspace</h3>
+      <p>Paste a GitHub fine-grained token with <b>Contents read and write</b> on <code>${REPO}</code>.
+      It stays on this device only.</p>
+      <input type="password" id="tok" placeholder="github_pat_...">
+      <p class="muted" style="margin-top:10px">github.com &rarr; Settings &rarr; Developer settings &rarr; Fine-grained tokens</p>
+      <button class="primary" onclick="saveTok()">Save</button>
+    </div>`;
 }
 function saveTok() {
-  token = $('tok').value.trim();
-  if (!token) return;
-  localStorage.setItem('pa_token', token); route();
+  const v = $('tok').value.trim();
+  if (!v) return;
+  token = v; localStorage.setItem('pa_token', v); route();
 }
 
+/* =============== home =============== */
 async function homeView() {
-  setHeader('PA Mobile', false, false);
-  $('main').innerHTML = '<p class="muted">Loading…</p>';
+  setHeader('PA Mobile', { actions: [{ icon: 'gear', label: 'Settings', fn: () => location.hash = '#/settings' }] });
+  const hr = new Date().getHours();
+  const greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+  const now = new Date();
+  $('main').innerHTML = `
+    <div class="greet">${greet}, Jeremy</div>
+    <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
+    <div id="todaycard"></div>
+    <div class="sect">Pages</div>
+    <div id="pages">${skels(6)}</div>`;
+  renderTodayCard();
   try {
     const pages = JSON.parse((await loadFile('phone/pages.json')).text);
-    $('main').innerHTML = '<div class="list">' + pages.map(p =>
-      `<a href="#/p/${encodeURIComponent(p.path)}">${p.title}<small>${p.path}</small></a>`).join('') + '</div>';
-  } catch (e) { $('main').innerHTML = `<p class="err">${e.message}</p>`; }
+    $('pages').innerHTML = '<div class="rowlist">' + pages.map(p =>
+      `<a href="#/p/${encodeURIComponent(p.path)}">
+        <span class="ric">${p.icon || '&#128196;'}</span>
+        <span class="rtx">${esc(p.title)}</span><span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>';
+  } catch (e) { $('pages').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+async function renderTodayCard() {
+  const el = $('todaycard');
+  if (!el) return;
+  if (!gcid && !DEMO) {
+    el.innerHTML = `<div class="card connect">
+      <p>Connect Google to see today's events and tasks here.</p>
+      <button class="ghost" onclick="location.hash='#/settings'">Set up in Settings</button></div>`;
+    return;
+  }
+  if (!gtokValid()) {
+    el.innerHTML = `<div class="card connect">
+      <p>Google connection expired.</p>
+      <button class="primary" onclick="gAuth(renderTodayCard)">Reconnect Google</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="card today">${skels(2)}</div>`;
+  try {
+    const t0 = new Date(); t0.setHours(0,0,0,0);
+    const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
+    const [evs, tasks] = await Promise.all([
+      gcalList(t0, t1),
+      gtasksList().catch(() => null),
+    ]);
+    const today = dkey(new Date());
+    const due = (tasks || []).filter(t => t.due && t.due.slice(0, 10) <= today);
+    let html = `<div class="thead">${ICONS.cal} Today</div>`;
+    html += evs.length ? evs.map(ev => {
+      const allday = !ev.start.dateTime;
+      const tt = allday ? 'All day' : fmtTime(new Date(ev.start.dateTime));
+      return `<div class="tev"><span class="tt">${tt}</span><span>${esc(ev.summary || '(no title)')}</span></div>`;
+    }).join('') : '<div class="tev muted">No events today</div>';
+    if (due.length) html += `<div class="tasksum"><a href="#/tasks"><b>${due.length}</b> task${due.length > 1 ? 's' : ''} due</a></div>`;
+    el.innerHTML = `<div class="card today" onclick="if(event.target.tagName!=='A')location.hash='#/cal'">${html}</div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="card connect"><p>${esc(e.message)}</p>
+      <button class="primary" onclick="gAuth(renderTodayCard)">Reconnect Google</button></div>`;
+  }
 }
 
-async function dirView(path, entries) {
-  setHeader(path.split('/').pop() || path, true, false);
+/* =============== folder view =============== */
+function dirView(path, entries) {
+  setHeader(path.split('/').pop() || path, { back: true });
   const visible = entries.filter(e =>
     !e.name.startsWith('.') && !e.name.startsWith('_') &&
+    !/\.(bak|tmp)$/.test(e.name) && !/\.recovered-/.test(e.name) &&
     (e.type === 'dir' || e.name.endsWith('.md')));
   visible.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
-  $('main').innerHTML = '<div class="list">' + visible.map(e =>
-    `<a href="#/p/${encodeURIComponent(e.path)}">${e.type === 'dir' ? '&#128193; ' : ''}${e.name.replace(/\.md$/, '')}</a>`).join('') + '</div>'
-    || '<p class="muted">Empty.</p>';
+  $('main').innerHTML = visible.length
+    ? '<div class="rowlist">' + visible.map(e =>
+      `<a href="#/p/${encodeURIComponent(e.path)}">
+        <span class="ric">${e.type === 'dir' ? '&#128193;' : '&#128196;'}</span>
+        <span class="rtx">${esc(e.name.replace(/\.md$/, ''))}</span>
+        <span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>'
+    : '<div class="empty">Nothing here yet.</div>';
+}
+
+/* =============== document view: block editing =============== */
+const BLOCK_START = /^(#{1,6}\s|```|~~~|\s*(?:[-*+]|\d+[.)])\s|\s*>|\s*\|)/;
+function parseBlocks(text) {
+  const lines = text.split('\n');
+  const blocks = [];
+  const push = (s, e, type) => blocks.push({ start: s, end: e, type, src: lines.slice(s, e + 1).join('\n') });
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { i++; continue; }
+    if (/^(```|~~~)/.test(l)) {
+      const fence = l.match(/^(```|~~~)/)[1];
+      let j = i + 1;
+      while (j < lines.length && !lines[j].startsWith(fence)) j++;
+      push(i, Math.min(j, lines.length - 1), 'code'); i = j + 1; continue;
+    }
+    if (/^#{1,6}\s/.test(l)) { push(i, i, 'heading'); i++; continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { push(i, i, 'hr'); i++; continue; }
+    if (/^\s*(?:[-*+]|\d+[.)])\s/.test(l)) {
+      let j = i + 1;   // continuation lines: indented, not a new list item
+      while (j < lines.length && /^\s{2,}\S/.test(lines[j]) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(lines[j])) j++;
+      push(i, j - 1, 'li'); i = j; continue;
+    }
+    if (/^\s*>/.test(l)) {
+      let j = i + 1; while (j < lines.length && /^\s*>/.test(lines[j])) j++;
+      push(i, j - 1, 'quote'); i = j; continue;
+    }
+    if (/^\s*\|/.test(l)) {
+      let j = i + 1; while (j < lines.length && /^\s*\|/.test(lines[j])) j++;
+      push(i, j - 1, 'table'); i = j; continue;
+    }
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() && !BLOCK_START.test(lines[j])) j++;
+    push(i, j - 1, 'p'); i = j;
+  }
+  return blocks;
+}
+/* split a list-item block into editable prefix ("- [ ] ") and text */
+const LI_RE = /^(\s*(?:[-*+]|\d+[.)])\s+(?:\[( |x|X)\]\s+)?)([\s\S]*)$/;
+function liParts(src) {
+  const m = src.match(LI_RE);
+  return m ? { prefix: m[1], boxed: m[2] !== undefined, text: m[3] } : { prefix: '', boxed: false, text: src };
 }
 
 async function openPage(path) {
-  setHeader(path.split('/').pop(), true, false);
-  $('main').innerHTML = '<p class="muted">Loading…</p>';
-  try {
-    const j = await (await gh(path)).json();
-    if (Array.isArray(j)) return dirView(path, j);
-    cur = { path, sha: j.sha, text: b64decode(j.content) };
-    if (!path.endsWith('.md')) return editView(path, true);
-    setHeader(path.split('/').pop().replace(/\.md$/, ''), true, true);
-    $('editBtn').onclick = () => { location.hash = '#/e/' + encodeURIComponent(path); };
-    $('main').innerHTML = '<div id="md">' + marked.parse(cur.text, { gfm: true, breaks: false }) + '</div>';
-    wireCheckboxes();
-  } catch (e) { $('main').innerHTML = `<p class="err">${e.message}</p>`; }
+  const j = await ghGet(path);
+  if (Array.isArray(j)) return dirView(path, j);
+  cur = { path, sha: j.sha, text: b64decode(j.content) };
+  if (!path.endsWith('.md')) return rawView(path, true);
+  docView(path);
 }
-
-/* tappable task-list checkboxes: toggle nth marker in source, commit */
-function wireCheckboxes() {
-  const boxes = [...$('main').querySelectorAll('input[type=checkbox]')];
-  boxes.forEach((box, i) => {
-    box.disabled = false;
-    box.onchange = async () => {
-      boxes.forEach(b => b.disabled = true);
-      const re = /((?:^|\n)\s*(?:[-*+]|\d+\.)\s+\[)( |x|X)(\])/g;
-      let n = -1;
-      const next = cur.text.replace(re, (m, a, state, c) => {
-        n++;
-        return n === i ? a + (state === ' ' ? 'x' : ' ') + c : m;
-      });
-      if (n < i) { toast('Could not match checkbox'); boxes.forEach(b => b.disabled = false); return; }
-      try {
-        const sha = await saveFile(cur.path, next, cur.sha, 'phone: toggle task in ' + cur.path);
-        if (sha) { cur.text = next; cur.sha = sha; toast('Saved'); boxes.forEach(b => b.disabled = false); }
-      } catch (e) { toast('Save failed: ' + e.message); boxes.forEach(b => b.disabled = false); }
-    };
+function docView(path) {
+  setHeader(path.split('/').pop().replace(/\.md$/, ''), {
+    back: true,
+    actions: [{ label: 'Raw', fn: () => location.hash = '#/raw/' + encodeURIComponent(cur.path) }],
   });
+  $('main').innerHTML = '<div id="doc"></div>';
+  renderDoc();
+}
+function renderDoc() {
+  const doc = $('doc');
+  if (!doc) return;
+  const blocks = parseBlocks(cur.text);
+  doc.innerHTML = '';
+  let listWrap = null, listIndent = null;
+  blocks.forEach((b, bi) => {
+    const el = document.createElement('div');
+    el.className = 'blk'; el.dataset.bi = bi;
+    if (b.type === 'li') {
+      const indent = b.src.match(/^\s*/)[0].length;
+      if (!listWrap || indent !== listIndent) {
+        if (listWrap) addListPlus(listWrap, blocks);
+        listWrap = document.createElement('div'); listWrap.className = 'listrun';
+        listWrap.style.marginLeft = (indent * 0.55) + 'em';
+        listIndent = indent; doc.appendChild(listWrap);
+      }
+      el.innerHTML = marked.parse(b.src.replace(new RegExp('^\\s{0,' + listIndent + '}', 'gm'), ''), { gfm: true });
+      styleTaskList(el, b);
+      listWrap.appendChild(el);
+      if (bi === blocks.length - 1) addListPlus(listWrap, blocks);
+    } else {
+      if (listWrap) { addListPlus(listWrap, blocks); listWrap = null; listIndent = null; }
+      el.innerHTML = b.type === 'hr' ? '<hr style="border:none;border-top:1px solid var(--line);margin:18px 0">'
+        : marked.parse(b.src, { gfm: true });
+      doc.appendChild(el);
+    }
+    if (b.type !== 'li' && listWrap) { listWrap = null; listIndent = null; }
+    el.addEventListener('click', ev => {
+      if (ev.target.closest('input,button')) return;
+      const a = ev.target.closest('a');
+      if (a) { handleLink(ev, a); return; }
+      startBlockEdit(el, bi);
+    });
+  });
+  const add = document.createElement('button');
+  add.className = 'addblock'; add.innerHTML = ICONS.plus + ' Add text';
+  add.onclick = () => startBlockEdit(null, -1);
+  doc.appendChild(add);
+}
+function addListPlus(wrap, blocks) {
+  const lastEl = wrap.querySelector('.blk:last-of-type');
+  if (!lastEl) return;
+  const bi = +lastEl.dataset.bi;
+  const b = blocks[bi];
+  const p = liParts(b.src.split('\n')[0]);
+  const btn = document.createElement('button');
+  btn.className = 'additem'; btn.innerHTML = ICONS.plus + (p.boxed ? ' To-do' : ' Item');
+  btn.onclick = () => insertListItem(bi, p);
+  wrap.appendChild(btn);
+}
+function styleTaskList(el, b) {
+  const box = el.querySelector('input[type=checkbox]');
+  if (!box) return;
+  el.querySelectorAll('ul').forEach(u => u.classList.add('cklist'));
+  const li = el.querySelector('li');
+  if (box.checked && li) li.classList.add('done');
+  box.disabled = false;
+  box.onchange = async () => {
+    box.disabled = true;
+    const src = b.src.replace(/\[( |x|X)\]/, m => m === '[ ]' ? '[x]' : '[ ]');
+    const ok = await spliceSave(b, src, 'phone: toggle task in ' + cur.path);
+    if (!ok) box.disabled = false;
+  };
+}
+function handleLink(ev, a) {
+  const href = a.getAttribute('href') || '';
+  if (/^https?:/.test(href)) { a.target = '_blank'; a.rel = 'noopener'; return; }
+  ev.preventDefault();
+  if (href.startsWith('#')) return;
+  const base = cur.path.split('/').slice(0, -1);
+  const parts = href.split('/');
+  for (const p of parts) {
+    if (p === '..') base.pop(); else if (p !== '.') base.push(p);
+  }
+  location.hash = '#/p/' + encodeURIComponent(base.join('/').split('#')[0]);
+}
+/* replace block bi's lines with newSrc (null = delete), commit, re-render */
+async function spliceSave(b, newSrc, msg, extraLine) {
+  const lines = cur.text.split('\n');
+  if (newSrc === null) lines.splice(b.start, b.end - b.start + 1);
+  else if (extraLine) lines.splice(b.end + 1, 0, ...newSrc.split('\n'));   // insert AFTER block
+  else lines.splice(b.start, b.end - b.start + 1, ...newSrc.split('\n'));
+  const next = lines.join('\n');
+  try {
+    const sha = await saveFile(cur.path, next, cur.sha, msg);
+    if (!sha) { toast('File changed elsewhere. Reloading.'); await reloadCur(); return false; }
+    cur.text = next; cur.sha = sha;
+    const y = window.scrollY; renderDoc(); window.scrollTo(0, y);
+    return true;
+  } catch (e) { toast('Save failed: ' + e.message); return false; }
+}
+async function reloadCur() {
+  cur = await loadFile(cur.path);
+  const y = window.scrollY; renderDoc(); window.scrollTo(0, y);
+}
+function startBlockEdit(el, bi) {
+  document.querySelectorAll('.blkedit').forEach(x => x.remove());
+  document.querySelectorAll('.blk.hidden-edit').forEach(x => { x.style.display = ''; x.classList.remove('hidden-edit'); });
+  const blocks = parseBlocks(cur.text);
+  const b = bi >= 0 ? blocks[bi] : null;
+  let display = '', prefix = '', suffix = '';
+  if (b) {
+    if (b.type === 'heading') {
+      const m = b.src.match(/^(#{1,6}\s+)([\s\S]*)$/); prefix = m[1]; display = m[2];
+    } else if (b.type === 'li' && !b.src.includes('\n')) {
+      const p = liParts(b.src); prefix = p.prefix; display = p.text;
+    } else display = b.src;
+  }
+  const ed = document.createElement('div');
+  ed.className = 'blkedit';
+  ed.innerHTML = `<textarea id="bed"></textarea>
+    <div class="ebar">
+      <button class="primary" id="bsave">Save</button>
+      <button class="ghost" id="bcancel">Cancel</button>
+      <span class="sp"></span>
+      ${b ? `<button class="iconbtn" id="bdel" aria-label="Delete" style="color:var(--danger)">${ICONS.trash}</button>` : ''}
+    </div>`;
+  if (el) { el.style.display = 'none'; el.classList.add('hidden-edit'); el.after(ed); }
+  else $('doc').insertBefore(ed, $('doc').lastElementChild);
+  const ta = ed.querySelector('#bed');
+  ta.value = display;
+  const fit = () => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
+  ta.addEventListener('input', fit); fit(); ta.focus();
+  const close = () => { ed.remove(); if (el) { el.style.display = ''; el.classList.remove('hidden-edit'); } };
+  ed.querySelector('#bcancel').onclick = close;
+  ed.querySelector('#bsave').onclick = async () => {
+    const v = ta.value.replace(/\s+$/, '');
+    if (b) {
+      if (!v.trim()) { await spliceSave(b, null, 'phone: delete block in ' + cur.path); return; }
+      await spliceSave(b, prefix + v + suffix, 'phone: edit ' + cur.path);
+    } else {
+      if (!v.trim()) { close(); return; }
+      const lines = cur.text.replace(/\s+$/, '');
+      const next = (lines ? lines + '\n\n' : '') + v + '\n';
+      try {
+        const sha = await saveFile(cur.path, next, cur.sha, 'phone: add to ' + cur.path);
+        if (!sha) { toast('File changed elsewhere. Reloading.'); await reloadCur(); return; }
+        cur.text = next; cur.sha = sha; renderDoc();
+        window.scrollTo(0, document.body.scrollHeight);
+      } catch (e) { toast('Save failed: ' + e.message); }
+    }
+  };
+  const del = ed.querySelector('#bdel');
+  if (del) del.onclick = async () => { await spliceSave(b, null, 'phone: delete block in ' + cur.path); };
+}
+function insertListItem(bi, parts) {
+  const blocks = parseBlocks(cur.text);
+  const b = blocks[bi];
+  const ed = document.createElement('div');
+  ed.className = 'blkedit';
+  ed.innerHTML = `<textarea id="ned" placeholder="New item"></textarea>
+    <div class="ebar"><button class="primary" id="nsave">Add</button>
+    <button class="ghost" id="ncancel">Cancel</button></div>`;
+  const host = document.querySelector(`.blk[data-bi="${bi}"]`);
+  host.parentElement.insertBefore(ed, host.nextSibling);
+  const ta = ed.querySelector('#ned'); ta.focus();
+  ed.querySelector('#ncancel').onclick = () => ed.remove();
+  ed.querySelector('#nsave').onclick = async () => {
+    const v = ta.value.trim(); if (!v) { ed.remove(); return; }
+    let prefix = parts.prefix;
+    const num = prefix.match(/^(\s*)(\d+)([.)])(\s+)/);
+    if (num) prefix = num[1] + (parseInt(num[2]) + 1) + num[3] + num[4];
+    if (parts.boxed) prefix = prefix.replace(/\[( |x|X)\]/, '[ ]');
+    await spliceSave(b, prefix + v, 'phone: add item to ' + cur.path, true);
+  };
 }
 
-function editView(path, readOpen) {
-  setHeader('Edit: ' + path.split('/').pop(), true, false);
+/* =============== raw editor =============== */
+async function rawView(path, alreadyLoaded) {
+  if (!alreadyLoaded && cur.path !== path) cur = await loadFile(path);
+  setHeader('Raw: ' + path.split('/').pop(), { back: true });
   $('main').innerHTML = `
-    <textarea id="ta" spellcheck="false"></textarea>
-    <p style="display:flex;gap:8px">
-      <button class="primary" onclick="doSave()">Save</button>
-      <button onclick="goBack()">Cancel</button>
-    </p>`;
-  $('ta').value = cur.text;
+    <textarea id="rawta" spellcheck="false" style="height:68vh;font:13.5px/1.5 ui-monospace,Menlo,Consolas,monospace"></textarea>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="primary" onclick="rawSave()">Save</button>
+      <button class="ghost" onclick="history.back()">Cancel</button>
+    </div>`;
+  $('rawta').value = cur.text;
 }
-async function doSave() {
-  const text = $('ta').value;
+async function rawSave() {
   try {
+    const text = $('rawta').value;
     const sha = await saveFile(cur.path, text, cur.sha);
-    if (sha) { cur.text = text; cur.sha = sha; toast('Saved'); goBack(); }
+    if (!sha) { toast('File changed elsewhere. Reloading.'); cur = await loadFile(cur.path); $('rawta').value = cur.text; return; }
+    cur.text = text; cur.sha = sha; toast('Saved'); history.back();
   } catch (e) { toast('Save failed: ' + e.message); }
 }
 
-/* ---------- router ---------- */
-async function route() {
-  if (!token) return tokenView();
-  const h = decodeURIComponent(location.hash);
-  if (h.startsWith('#/e/')) {
-    const path = h.slice(4);
-    if (cur.path !== path) cur = await loadFile(path);
-    return editView(path);
+/* =============== Udemy script view =============== */
+const WPM = 145;
+const ANIM_RE = /^anim:\s?/, VIS_RE = /^(visual:|action:)/;
+function uParse(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let c = { kind: 'prose', marker: null, lines: [] };
+  const flush = () => { if (c.lines.length || c.kind === 'block') out.push(c); };
+  for (const line of lines) {
+    const m = line.match(/^\[(SLIDE|DEMO) [^\]]+\]\s*$/);
+    const ends = /^(#{1,3} |---\s*$)/.test(line);
+    if (m) { flush(); c = { kind: 'block', marker: line.trim(), lines: [] }; }
+    else if (ends && c.kind === 'block') { flush(); c = { kind: 'prose', marker: null, lines: [line] }; }
+    else c.lines.push(line);
   }
-  if (h.startsWith('#/p/')) return openPage(h.slice(4));
-  return homeView();
+  flush();
+  return out.map(s => {
+    if (s.kind === 'prose') return { kind: 'prose', text: s.lines.join('\n') };
+    const anim = s.lines.filter(l => ANIM_RE.test(l)).map(l => l.replace(ANIM_RE, ''));
+    const vis = s.lines.filter(l => VIS_RE.test(l));
+    const narr = s.lines.filter(l => !ANIM_RE.test(l) && !VIS_RE.test(l));
+    while (narr.length && !narr[0].trim()) narr.shift();
+    while (narr.length && !narr[narr.length - 1].trim()) narr.pop();
+    return { kind: 'block', marker: s.marker, visual: vis.join('\n'), narr: narr.join('\n'), anim: anim.join('\n') };
+  });
 }
-window.addEventListener('hashchange', route);
+function uSerialize(segs) {
+  return segs.map(s => {
+    if (s.kind === 'prose') return s.text;
+    const out = [s.marker];
+    out.push(...s.visual.split('\n').filter(l => l.trim()));
+    out.push(...s.anim.split('\n').filter(l => l.trim()).map(l => 'anim: ' + l.trim()));
+    const narr = s.narr.replace(/\s+$/, '');
+    if (narr.trim()) { out.push(''); out.push(...narr.split('\n')); }
+    out.push('');
+    return out.join('\n');
+  }).join('\n');
+}
+function narrWords(t) { t = t.trim(); return t ? t.split(/\s+/).length : 0; }
+function fmtDur(w) { const s = Math.round(w / WPM * 60); return Math.floor(s / 60) + ':' + pad(s % 60); }
+function uPreview(seg, el) {
+  const isDemo = seg.marker.startsWith('[DEMO');
+  const vLines = seg.visual.split('\n').map(l => l.trim())
+    .filter(l => VIS_RE.test(l)).map(l => l.replace(/^(visual:|action:)\s*/, ''));
+  const inner = vLines.join(' ').split(/(?<=[.:]) /).map(t => '<div class="v-line">' + esc(t) + '</div>').join('');
+  el.innerHTML = isDemo
+    ? '<div class="screen"><div class="chrome"><i></i><i></i><i></i>&nbsp;screen recording</div><div class="body">' + inner + '</div></div>'
+    : '<div class="board"><div class="b-kicker">sketch: dark canvas, hand-drawn</div>' + inner + '</div>';
+}
+async function udemyView(path) {
+  if (cur.path !== path) cur = await loadFile(path);
+  const name = path.split('/').pop().replace(/\.md$/, '');
+  setHeader(name, { back: true, actions: [{ label: 'Raw', fn: () => {
+    if (!uGuard()) return;
+    leaveGuard = null; location.hash = '#/raw/' + encodeURIComponent(path);
+  } }] });
+  let segs = uParse(cur.text);
+  let dirty = false;
+  const draftKey = 'pa_draft_' + path;
+  $('main').innerHTML = `
+    <div id="ubanner"></div>
+    <div class="u-tot" id="utot"></div>
+    <div id="usegs"></div>
+    <div class="savebar" id="usave" style="display:none">
+      <span class="msg">Unsaved changes</span>
+      <button class="ghost" id="udiscard">Discard</button>
+      <button class="primary" id="usavebtn">Save</button>
+    </div>`;
+  const draft = localStorage.getItem(draftKey);
+  if (draft) {
+    $('ubanner').innerHTML = `<div class="banner">A draft from an earlier failed save exists on this device.
+      <div class="brow"><button class="primary" id="drRestore">Restore draft</button>
+      <button class="ghost" id="drDiscard">Discard it</button></div></div>`;
+    $('drRestore').onclick = () => { segs = uParse(draft); localStorage.removeItem(draftKey); build(); markDirty(); $('ubanner').innerHTML = ''; };
+    $('drDiscard').onclick = () => { localStorage.removeItem(draftKey); $('ubanner').innerHTML = ''; };
+  }
+  function uGuard() { return !dirty || confirm('You have unsaved script edits. Leave and lose them?'); }
+  leaveGuard = { check: uGuard, dirty: () => dirty, hash: '#/p/' + encodeURIComponent(path) };
+  function markDirty() { dirty = true; $('usave').style.display = ''; }
+  function totals() {
+    let w = 0; segs.forEach(s => { if (s.kind === 'block') w += narrWords(s.narr); });
+    $('utot').innerHTML = `<b>${w}</b>&nbsp;narration words &middot; ~<b>${fmtDur(w)}</b>&nbsp;at ${WPM} wpm`;
+  }
+  function fit(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
+  function build() {
+    const root = $('usegs'); root.innerHTML = '';
+    segs.forEach(seg => {
+      if (seg.kind === 'prose') {
+        if (!seg.text.trim()) return;
+        const d = document.createElement('details'); d.className = 'u-prose';
+        const firstLine = seg.text.split('\n').find(l => l.trim()) || 'notes';
+        d.innerHTML = `<summary>${esc(firstLine.replace(/^#+\s*/, '').slice(0, 60))}</summary>`;
+        const ta = document.createElement('textarea'); ta.className = 'mono';
+        ta.value = seg.text; ta.style.font = '13px/1.5 ui-monospace,Menlo,Consolas,monospace';
+        ta.addEventListener('input', () => { seg.text = ta.value; markDirty(); fit(ta); });
+        d.appendChild(ta);
+        d.addEventListener('toggle', () => { if (d.open) fit(ta); });
+        root.appendChild(d);
+        return;
+      }
+      const card = document.createElement('div'); card.className = 'u-blk';
+      const isDemo = seg.marker.startsWith('[DEMO');
+      card.innerHTML = `<div><span class="u-mark${isDemo ? ' demo' : ''}">${esc(seg.marker)}</span><span class="u-stats"></span></div>
+        <div class="uprev"></div>`;
+      const prev = card.querySelector('.uprev');
+      const stats = card.querySelector('.u-stats');
+      const refresh = () => {
+        const w = narrWords(seg.narr);
+        stats.textContent = w + ' words · ~' + fmtDur(w);
+        uPreview(seg, prev);
+      };
+      const mkField = (lbl, cls, val, key, ph) => {
+        const l = document.createElement('div'); l.className = 'u-lbl' + (key === 'anim' ? ' anim' : ''); l.textContent = lbl;
+        const ta = document.createElement('textarea'); if (cls) ta.className = cls;
+        ta.value = val; ta.placeholder = ph || '';
+        ta.addEventListener('input', () => { seg[key] = ta.value; markDirty(); fit(ta); refresh(); if (key === 'narr') totals(); });
+        card.appendChild(l); card.appendChild(ta);
+        requestAnimationFrame(() => fit(ta));
+      };
+      mkField(isDemo ? 'Action (on screen)' : 'Visual (on the slide)', 'mono', seg.visual, 'visual',
+        isDemo ? 'action: what happens on screen' : 'visual: what is drawn');
+      mkField('Animation plan', '', seg.anim, 'anim', 'What draws in, keyed to the narration');
+      mkField('Narration (spoken + captions)', '', seg.narr, 'narr', 'What the voice says over this slide');
+      root.appendChild(card);
+      refresh();
+    });
+    totals();
+  }
+  $('usavebtn').onclick = async () => {
+    let text = uSerialize(segs);
+    if (!text.endsWith('\n')) text += '\n';
+    $('usavebtn').disabled = true;
+    try {
+      const sha = await saveFile(cur.path, text, cur.sha, 'phone: edit script ' + name);
+      if (!sha) {
+        localStorage.setItem(draftKey, text);
+        cur = await loadFile(path);
+        $('ubanner').innerHTML = `<div class="banner">The file changed elsewhere (probably Claude edited it), so your version was
+          kept as a draft on this device instead of overwriting. Reloaded the latest file.
+          <div class="brow"><button class="primary" onclick="location.reload()">OK</button></div></div>`;
+        segs = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+        window.scrollTo(0, 0);
+        return;
+      }
+      cur.text = text; cur.sha = sha; dirty = false;
+      $('usave').style.display = 'none'; toast('Saved');
+    } catch (e) { toast('Save failed: ' + e.message); }
+    $('usavebtn').disabled = false;
+  };
+  $('udiscard').onclick = () => {
+    if (!confirm('Discard your edits and reload?')) return;
+    segs = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+  };
+  build();
+}
+
+/* =============== Google layer =============== */
+function gtokValid() { return DEMO || (gtok && Date.now() < gtok.exp); }
+let tokenClient = null, afterAuth = null;
+function gisReady() { return typeof google !== 'undefined' && google.accounts; }
+/* MUST be called synchronously from a tap handler (iOS popup rule) */
+function gAuth(after) {
+  afterAuth = after || null;
+  if (DEMO) { afterAuth && afterAuth(); return; }
+  if (!gcid) { location.hash = '#/settings'; return; }
+  if (!gisReady()) { toast('Google sign-in library still loading. Try again.'); return; }
+  if (!tokenClient) {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: gcid, scope: GSCOPES, prompt: '',
+      callback: resp => {
+        if (resp.error) { toast('Google auth: ' + resp.error); return; }
+        gtok = { t: resp.access_token, exp: Date.now() + (resp.expires_in - 60) * 1000 };
+        localStorage.setItem('pa_gtok', JSON.stringify(gtok));
+        const f = afterAuth; afterAuth = null; f && f();
+      },
+      error_callback: e => toast('Google sign-in did not open (' + (e.type || 'blocked') + '). Tap again.'),
+    });
+  }
+  tokenClient.requestAccessToken();
+}
+async function gfetch(url, opts = {}) {
+  if (!gtokValid()) throw new Error('Google not connected');
+  opts.headers = Object.assign({ 'Authorization': 'Bearer ' + gtok.t }, opts.headers || {});
+  if (opts.body) opts.headers['Content-Type'] = 'application/json';
+  const r = await fetch(url, opts);
+  if (r.status === 401 || r.status === 403) {
+    gtok = null; localStorage.removeItem('pa_gtok');
+    throw new Error('Google session expired');
+  }
+  if (!r.ok) throw new Error('Google API ' + r.status);
+  return r.json();
+}
+async function gcalList(t0, t1) {
+  const u = 'https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=100'
+    + '&timeMin=' + encodeURIComponent(t0.toISOString()) + '&timeMax=' + encodeURIComponent(t1.toISOString());
+  return (await gfetch(u)).items || [];
+}
+async function gcalInsert(body) {
+  return gfetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',
+    { method: 'POST', body: JSON.stringify(body) });
+}
+let taskListId = localStorage.getItem('pa_tasklist') || '';
+let taskLists = [];
+async function gtaskLists() {
+  taskLists = (await gfetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists')).items || [];
+  if (!taskListId || !taskLists.some(l => l.id === taskListId)) taskListId = taskLists[0] && taskLists[0].id || '';
+  return taskLists;
+}
+async function gtasksList() {
+  if (!taskListId) await gtaskLists();
+  const j = await gfetch('https://tasks.googleapis.com/tasks/v1/lists/' + taskListId + '/tasks?showCompleted=false&maxResults=100');
+  return j.items || [];
+}
+async function gtaskComplete(id) {
+  return gfetch('https://tasks.googleapis.com/tasks/v1/lists/' + taskListId + '/tasks/' + id,
+    { method: 'PATCH', body: JSON.stringify({ status: 'completed' }) });
+}
+async function gtaskInsert(title, due) {
+  const body = { title };
+  if (due) body.due = due + 'T00:00:00.000Z';
+  return gfetch('https://tasks.googleapis.com/tasks/v1/lists/' + taskListId + '/tasks',
+    { method: 'POST', body: JSON.stringify(body) });
+}
+
+/* =============== calendar view =============== */
+function connectBlock(reloadFn) {
+  if (!gcid && !DEMO) return `<div class="card connect">
+    <p>Link your Google account once in Settings, then your calendar and tasks live here.</p>
+    <button class="primary" onclick="location.hash='#/settings'">Open Settings</button></div>`;
+  return `<div class="card connect">
+    <p>Google connection needed.</p>
+    <button class="primary" onclick="gAuth(${reloadFn})">Connect Google</button></div>`;
+}
+async function calView() {
+  setHeader('Calendar', { actions: [{ icon: 'plus', label: 'New event', fn: calNewForm }] });
+  const m = $('main');
+  if (!gtokValid()) { m.innerHTML = connectBlock('calView'); return; }
+  m.innerHTML = `<div id="calform"></div><div id="agenda">${skels(5)}</div>`;
+  try {
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const t1 = new Date(t0); t1.setDate(t1.getDate() + 14);
+    const evs = await gcalList(t0, t1);
+    const byDay = {};
+    evs.forEach(ev => {
+      const d = ev.start.dateTime ? new Date(ev.start.dateTime) : new Date(ev.start.date + 'T00:00:00');
+      (byDay[dkey(d)] = byDay[dkey(d)] || []).push(ev);
+    });
+    let html = '';
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(t0); d.setDate(d.getDate() + i);
+      const list = byDay[dkey(d)];
+      if (!list && i > 0) continue;
+      html += `<div class="dayhead${i === 0 ? ' today' : ''}">${dayLabel(d)}<small>${i === 0 ? d.getDate() + ' ' + MONTHS[d.getMonth()] : ''}</small></div>`;
+      html += list ? '<div class="rowlist">' + list.map(ev => {
+        const allday = !ev.start.dateTime;
+        const tt = allday ? 'All day' : fmtTime(new Date(ev.start.dateTime)) +
+          (ev.end && ev.end.dateTime ? '<br>' + fmtTime(new Date(ev.end.dateTime)) : '');
+        return `<div class="ev"><span class="et">${tt}</span><span class="dot"></span><span class="es">${esc(ev.summary || '(no title)')}</span></div>`;
+      }).join('') + '</div>'
+        : '<div class="muted" style="padding:2px 6px 6px">No events</div>';
+    }
+    $('agenda').innerHTML = html || '<div class="empty">Nothing in the next two weeks.</div>';
+  } catch (e) {
+    m.innerHTML = connectBlock('calView') + `<p class="muted" style="text-align:center">${esc(e.message)}</p>`;
+  }
+}
+function calNewForm() {
+  if (!gtokValid()) { gAuth(calView); return; }
+  const f = $('calform');
+  if (!f || f.innerHTML) { if (f) f.innerHTML = ''; return; }
+  const today = dkey(new Date());
+  f.innerHTML = `<div class="card addform">
+    <input type="text" id="evTitle" placeholder="Event title">
+    <div class="frow"><input type="date" id="evDate" value="${today}">
+      <label><input type="checkbox" id="evAllday" style="width:17px;height:17px;vertical-align:-3px;accent-color:var(--accent)"> All day</label></div>
+    <div class="frow" id="evTimes"><input type="time" id="evStart" value="09:00"><input type="time" id="evEnd" value="10:00"></div>
+    <div class="frow"><button class="primary" onclick="calCreate()">Add event</button>
+      <button class="ghost" onclick="$('calform').innerHTML=''">Cancel</button></div></div>`;
+  $('evAllday').onchange = () => $('evTimes').style.display = $('evAllday').checked ? 'none' : '';
+  $('evStart').onchange = () => {
+    const [h, mi] = $('evStart').value.split(':').map(Number);
+    $('evEnd').value = pad((h + 1) % 24) + ':' + pad(mi);
+  };
+  $('evTitle').focus();
+}
+function rfcLocal(dateStr, timeStr) {
+  const d = new Date(dateStr + 'T' + timeStr);
+  const off = -d.getTimezoneOffset(); const sg = off >= 0 ? '+' : '-';
+  return dateStr + 'T' + timeStr + ':00' + sg + pad(Math.floor(Math.abs(off) / 60)) + ':' + pad(Math.abs(off) % 60);
+}
+async function calCreate() {
+  const title = $('evTitle').value.trim();
+  const date = $('evDate').value;
+  if (!title || !date) { toast('Give it a title and date'); return; }
+  let body;
+  if ($('evAllday').checked) {
+    const nd = new Date(date + 'T00:00:00'); nd.setDate(nd.getDate() + 1);
+    body = { summary: title, start: { date }, end: { date: dkey(nd) } };
+  } else {
+    const s = $('evStart').value, e = $('evEnd').value;
+    body = { summary: title, start: { dateTime: rfcLocal(date, s) }, end: { dateTime: rfcLocal(date, e) } };
+  }
+  try { await gcalInsert(body); toast('Event added'); calView(); }
+  catch (e) { toast(e.message); }
+}
+
+/* =============== tasks view =============== */
+async function tasksView() {
+  setHeader('Tasks');
+  const m = $('main');
+  if (!gtokValid()) { m.innerHTML = connectBlock('tasksView'); return; }
+  m.innerHTML = `
+    <div class="card addform" style="padding:12px 14px">
+      <input type="text" id="tkTitle" placeholder="Add a task...">
+      <div class="frow"><input type="date" id="tkDue">
+        <button class="primary" onclick="taskCreate()" style="flex:0 0 auto">Add</button></div>
+    </div>
+    <div id="tkChips"></div>
+    <div id="tkList">${skels(4)}</div>`;
+  $('tkTitle').addEventListener('keydown', e => { if (e.key === 'Enter') taskCreate(); });
+  try {
+    await gtaskLists();
+    if (taskLists.length > 1) {
+      $('tkChips').innerHTML = '<div class="chips">' + taskLists.map(l =>
+        `<button class="${l.id === taskListId ? 'on' : ''}" onclick="pickList('${l.id}')">${esc(l.title)}</button>`).join('') + '</div>';
+    }
+    const items = await gtasksList();
+    renderTasks(items);
+  } catch (e) {
+    m.innerHTML = connectBlock('tasksView') + `<p class="muted" style="text-align:center">${esc(e.message)}</p>`;
+  }
+}
+function pickList(id) { taskListId = id; localStorage.setItem('pa_tasklist', id); tasksView(); }
+function renderTasks(items) {
+  const today = dkey(new Date());
+  items.sort((a, b) => {
+    if (!!a.due !== !!b.due) return a.due ? -1 : 1;
+    if (a.due !== b.due) return a.due < b.due ? -1 : 1;
+    return (a.position || '') < (b.position || '') ? -1 : 1;
+  });
+  $('tkList').innerHTML = items.length ? '<div class="rowlist">' + items.map(t => {
+    const dueDay = t.due ? t.due.slice(0, 10) : '';
+    const over = dueDay && dueDay < today;
+    const dueLbl = dueDay ? (dueDay === today ? 'Today' : dayLabel(new Date(dueDay + 'T00:00:00'))) : '';
+    return `<div class="task" id="tk_${t.id}">
+      <button class="tk" aria-label="Complete" onclick="taskDone('${t.id}')">${ICONS.check}</button>
+      <div class="tbody"><div class="ttl">${esc(t.title || '(no title)')}</div>
+      ${dueLbl ? `<div class="due${over ? ' over' : ''}">${over ? 'Overdue · ' : ''}${dueLbl}</div>` : ''}
+      ${t.notes ? `<div class="tnotes">${esc(t.notes)}</div>` : ''}</div></div>`;
+  }).join('') + '</div>'
+    : '<div class="empty">All clear. Add a task above.</div>';
+}
+async function taskDone(id) {
+  const el = $('tk_' + id);
+  try {
+    await gtaskComplete(id);
+    if (el) { el.classList.add('gone'); setTimeout(() => { el.remove(); }, 260); }
+    toast('Done');
+  } catch (e) { toast(e.message); }
+}
+async function taskCreate() {
+  const title = $('tkTitle').value.trim();
+  if (!title) return;
+  try {
+    await gtaskInsert(title, $('tkDue').value || null);
+    $('tkTitle').value = ''; $('tkDue').value = '';
+    const items = await gtasksList(); renderTasks(items);
+    toast('Task added');
+  } catch (e) { toast(e.message); }
+}
+
+/* =============== settings =============== */
+function settingsView() {
+  setHeader('Settings', { back: true });
+  $('main').innerHTML = `<div class="set">
+    <div class="card">
+      <h3>GitHub</h3>
+      <p>Fine-grained token with Contents read and write on ${REPO}. Stored on this device only.</p>
+      <div class="stat ${token ? 'ok' : ''}">${token ? 'Connected' : 'Not set'}</div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="ghost" onclick="replaceTok()">${token ? 'Replace token' : 'Add token'}</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Google Calendar and Tasks</h3>
+      <p>Paste your OAuth Client ID once, then connect. Google shows a consent screen the first
+      time. The connection lasts about an hour per session; reconnect is one tap.</p>
+      <input type="text" id="cid" placeholder="1234...apps.googleusercontent.com" value="${esc(gcid)}">
+      <div class="stat ${gtokValid() ? 'ok' : ''}" id="gstat">${gtokValid() ? 'Connected' : (gcid ? 'Not connected' : 'No client ID yet')}</div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <button class="primary" onclick="saveCidAndConnect()">Save and connect</button>
+        ${gtok ? '<button class="ghost danger" onclick="gDisconnect()">Disconnect</button>' : ''}
+      </div>
+    </div>
+    <p class="muted" style="text-align:center">PA Mobile v2</p>
+  </div>`;
+}
+function replaceTok() {
+  localStorage.removeItem('pa_token'); token = ''; route();
+}
+function saveCidAndConnect() {
+  const v = $('cid').value.trim();
+  if (!v) { toast('Paste the client ID first'); return; }
+  if (v !== gcid) { gcid = v; localStorage.setItem('pa_gcid', v); tokenClient = null; }
+  gAuth(settingsView);
+}
+function gDisconnect() {
+  if (gtok && gisReady()) try { google.accounts.oauth2.revoke(gtok.t, () => {}); } catch (e) {}
+  gtok = null; localStorage.removeItem('pa_gtok'); settingsView();
+}
+
+/* =============== demo mode (visual testing only) =============== */
+if (DEMO) {
+  token = 'demo'; gcid = 'demo';
+  const files = {
+    'phone/pages.json': JSON.stringify([
+      { title: 'Current priorities', path: 'context/current-priorities.md', icon: '\u{1F3AF}' },
+      { title: 'Uni roadmap', path: 'uni/roadmap.md', icon: '\u{1F393}' },
+      { title: 'Udemy scripts', path: 'projects/udemy-course/scripts', icon: '\u{1F3AC}' },
+      { title: 'Plans', path: 'plans', icon: '\u{1F5FA}' },
+    ]),
+    'context/current-priorities.md': '# Current priorities\n\n*Last updated: 2026-07-11*\n\n1. **SMU on-ramp** - matriculation admin, camps, Term 1 launch.\n2. **FARA** - make fara.sg profitable.\n\n## This week\n\n- [x] Matriculation forms\n- [ ] Book Bondue camp slot\n- [ ] FA weekly sweep review\n\nSome closing paragraph with a [link](../uni/roadmap.md) and `code`.\n',
+    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min) [slides]\n\nTarget: 3-4 min.\n\n[SLIDE 0.1-01]\nvisual: Dark canvas. Course title handwritten in white, centre.\nvisual: Three small doodles under it, one-word labels.\nanim: Title writes itself as the narration opens.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\n[DEMO 0.1-02]\naction: Show messy handwritten notes, then the clean output.\nanim: Zoom into the checklist.\n\nWatch what I do here, because every technique gets its own lesson later.\n',
+  };
+  loadFile = async path => ({ path, sha: 'demo',
+    text: files[path] || '# ' + path.split('/').pop().replace(/\.md$/, '') + '\n\nDemo file.\n\n- [ ] item one\n- [x] item two\n' });
+  openPage = async path => {
+    if (!path.includes('.')) return dirView(path, [
+      { name: 'section-00.md', path: 'projects/udemy-course/scripts/section-00.md', type: 'file' },
+      { name: 'section-01.md', path: 'projects/udemy-course/scripts/section-01.md', type: 'file' },
+    ]);
+    cur = await loadFile(path);
+    docView(path);
+  };
+  saveFile = async (p, text) => { files[p] = text; return 'demo'; };
+  const now = new Date();
+  const at = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.toISOString(); };
+  gcalList = async () => [
+    { summary: 'Chess lesson with Nathanael', start: { dateTime: at(16, 0) }, end: { dateTime: at(17, 0) } },
+    { summary: 'Bondue camp briefing', start: { date: dkey(now) }, end: { date: dkey(now) } },
+    { summary: 'Gym', start: { dateTime: at(19, 30) }, end: { dateTime: at(20, 30) } },
+  ];
+  gtaskLists = async () => (taskLists = [{ id: '1', title: 'My Tasks' }, { id: '2', title: 'Uni' }], taskListId = taskListId || '1', taskLists);
+  gtasksList = async () => [
+    { id: 'a', title: 'Submit matriculation form', due: now.toISOString() },
+    { id: 'b', title: 'Review FA sweep output', due: '2026-07-09T00:00:00.000Z' },
+    { id: 'c', title: 'Practise bass 20 min', notes: 'Riff from lesson 3' },
+  ];
+  gtaskComplete = async () => ({});
+  gtaskInsert = async () => ({});
+  gcalInsert = async () => ({});
+}
+
 route();
 </script>
 </body>
