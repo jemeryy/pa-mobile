@@ -251,6 +251,26 @@
   .connect { text-align: center; padding: 26px 18px; }
   .connect p { margin: 0 0 14px; color: var(--muted); font-size: 14.5px; }
 
+  /* ---------- month grid ---------- */
+  .cal-chrome { display: flex; align-items: center; gap: 2px; margin: 2px 0 10px; }
+  .cal-chrome .mtitle { flex: 1; font-size: 19px; font-weight: 700; letter-spacing: -.01em; padding-left: 4px; }
+  .cal-chrome .txtbtn { padding: 6px 10px; }
+  .cal-wk { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center;
+    font-size: 11px; font-weight: 650; color: var(--muted); padding: 2px 0 6px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; touch-action: pan-y; }
+  .cal-day { border: none; background: none; padding: 5px 0 4px; display: flex; flex-direction: column;
+    align-items: center; gap: 3px; color: var(--ink); border-radius: 10px; min-height: 46px; }
+  .cal-day:active { background: var(--surface); }
+  .cal-day .dn { font-size: 14px; width: 28px; height: 28px; line-height: 28px; text-align: center;
+    border-radius: 50%; font-variant-numeric: tabular-nums; }
+  .cal-day.oth { color: var(--muted); opacity: .45; }
+  .cal-day.today .dn { background: var(--accent); color: #fff; font-weight: 700; }
+  .cal-day.sel { background: var(--surface); }
+  .cal-day.sel:not(.today) .dn { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); font-weight: 650; }
+  .cal-day .dots { display: flex; gap: 3px; height: 5px; }
+  .cal-day .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .cal-day.oth .dots i { background: var(--muted); }
+
   /* ---------- settings ---------- */
   .set .card h3 { margin: 0 0 4px; font-size: 15.5px; }
   .set .card p { margin: 4px 0 10px; color: var(--muted); font-size: 13.5px; }
@@ -981,45 +1001,120 @@ function connectBlock(reloadFn) {
     <p>Google connection needed.</p>
     <button class="primary" onclick="gAuth(${reloadFn})">Connect Google</button></div>`;
 }
+let calCursor = null;   // Date at the first of the visible month
+let calSel = null;      // 'YYYY-MM-DD' selected day
+let calMap = {};        // dkey -> [events] for the visible window
+function monthGridDays(cur) {
+  const y = cur.getFullYear(), mo = cur.getMonth();
+  const offset = new Date(y, mo, 1).getDay();              // 0 = Sunday
+  const total = new Date(y, mo + 1, 0).getDate();
+  const rows = Math.ceil((offset + total) / 7);            // 4-6 weeks, no empty trailing row
+  const start = new Date(y, mo, 1 - offset);
+  return Array.from({ length: rows * 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+}
+function bucketEvents(evs) {
+  const map = {};
+  for (const ev of evs) {
+    if (ev.start.dateTime) {
+      const k = dkey(new Date(ev.start.dateTime));
+      (map[k] = map[k] || []).push(ev);
+    } else {                                                // all-day; end.date is exclusive
+      const s = new Date(ev.start.date + 'T00:00:00');
+      let e = ev.end && ev.end.date ? new Date(ev.end.date + 'T00:00:00') : new Date(s.getTime() + 864e5);
+      if (e <= s) e = new Date(s.getTime() + 864e5);
+      for (const d = new Date(s); d < e; d.setDate(d.getDate() + 1)) {
+        const k = dkey(d); (map[k] = map[k] || []).push(ev);
+      }
+    }
+  }
+  return map;
+}
+function evStartMin(ev) {
+  if (!ev.start.dateTime) return -1;                        // all-day sorts first
+  const d = new Date(ev.start.dateTime); return d.getHours() * 60 + d.getMinutes();
+}
 async function calView() {
+  if (!calCursor) { const n = new Date(); calCursor = new Date(n.getFullYear(), n.getMonth(), 1); }
+  if (!calSel) calSel = dkey(new Date());
   setHeader('Calendar', { actions: [{ icon: 'plus', label: 'New event', fn: calNewForm }] });
   const m = $('main');
   if (!gtokValid()) { m.innerHTML = connectBlock('calView'); return; }
-  m.innerHTML = `<div id="calform"></div><div id="agenda">${skels(5)}</div>`;
+  m.innerHTML = `
+    <div class="cal-chrome">
+      <div class="mtitle">${MONTHS[calCursor.getMonth()]} ${calCursor.getFullYear()}</div>
+      <button class="txtbtn" id="calToday">Today</button>
+      <button class="iconbtn" id="calPrev" aria-label="Previous month">${ICONS.back}</button>
+      <button class="iconbtn" id="calNext" aria-label="Next month" style="transform:scaleX(-1)">${ICONS.back}</button>
+    </div>
+    <div class="cal-wk">${['S','M','T','W','T','F','S'].map(d => `<span>${d}</span>`).join('')}</div>
+    <div class="cal-grid" id="calGrid">${monthGridDays(calCursor).map(() => '<div class="cal-day"><span class="dn"></span></div>').join('')}</div>
+    <div id="calform"></div>
+    <div id="dayPanel"></div>`;
+  $('calPrev').onclick = () => calShift(-1);
+  $('calNext').onclick = () => calShift(1);
+  $('calToday').onclick = () => { const n = new Date(); calCursor = new Date(n.getFullYear(), n.getMonth(), 1); calSel = dkey(n); calView(); };
+  wireSwipe($('calGrid'));
   try {
-    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-    const t1 = new Date(t0); t1.setDate(t1.getDate() + 14);
-    const evs = await gcalList(t0, t1);
-    const byDay = {};
-    evs.forEach(ev => {
-      const d = ev.start.dateTime ? new Date(ev.start.dateTime) : new Date(ev.start.date + 'T00:00:00');
-      (byDay[dkey(d)] = byDay[dkey(d)] || []).push(ev);
-    });
-    let html = '';
-    for (let i = 0; i < 14; i++) {
-      const d = new Date(t0); d.setDate(d.getDate() + i);
-      const list = byDay[dkey(d)];
-      if (!list && i > 0) continue;
-      html += `<div class="dayhead${i === 0 ? ' today' : ''}">${dayLabel(d)}<small>${i === 0 ? d.getDate() + ' ' + MONTHS[d.getMonth()] : ''}</small></div>`;
-      html += list ? '<div class="rowlist">' + list.map(ev => {
-        const allday = !ev.start.dateTime;
-        const tt = allday ? 'All day' : fmtTime(new Date(ev.start.dateTime)) +
-          (ev.end && ev.end.dateTime ? '<br>' + fmtTime(new Date(ev.end.dateTime)) : '');
-        return `<div class="ev"><span class="et">${tt}</span><span class="dot"></span><span class="es">${esc(ev.summary || '(no title)')}</span></div>`;
-      }).join('') + '</div>'
-        : '<div class="muted" style="padding:2px 6px 6px">No events</div>';
-    }
-    $('agenda').innerHTML = html || '<div class="empty">Nothing in the next two weeks.</div>';
+    const days = monthGridDays(calCursor);
+    calMap = bucketEvents(await gcalList(days[0], new Date(days[days.length - 1].getTime() + 864e5)));
+    renderGrid(days);
+    renderDayPanel();
   } catch (e) {
     m.innerHTML = connectBlock('calView') + `<p class="muted" style="text-align:center">${esc(e.message)}</p>`;
   }
+}
+function calShift(n) { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + n, 1); calView(); }
+function wireSwipe(el) {
+  let x0 = null, y0 = null;
+  el.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) calShift(dx < 0 ? 1 : -1);
+    x0 = y0 = null;
+  }, { passive: true });
+}
+function renderGrid(days) {
+  const today = dkey(new Date());
+  const mo = calCursor.getMonth();
+  $('calGrid').innerHTML = days.map(d => {
+    const k = dkey(d);
+    const n = (calMap[k] || []).length;
+    const dots = Array.from({ length: Math.min(n, 3) }, () => '<i></i>').join('');
+    const cls = ['cal-day', d.getMonth() !== mo ? 'oth' : '', k === today ? 'today' : '', k === calSel ? 'sel' : ''].filter(Boolean).join(' ');
+    return `<button class="${cls}" data-k="${k}" data-m="${d.getMonth()}"><span class="dn">${d.getDate()}</span><span class="dots">${dots}</span></button>`;
+  }).join('');
+  $('calGrid').querySelectorAll('.cal-day').forEach(b => b.onclick = () => {
+    const k = b.dataset.k;
+    if (+b.dataset.m !== mo) {                               // adjacent-month day: jump to that month
+      const d = new Date(k + 'T00:00:00');
+      calCursor = new Date(d.getFullYear(), d.getMonth(), 1); calSel = k; calView(); return;
+    }
+    calSel = k;
+    $('calGrid').querySelectorAll('.cal-day.sel').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel');
+    renderDayPanel();
+  });
+}
+function renderDayPanel() {
+  const evs = (calMap[calSel] || []).slice().sort((a, b) => evStartMin(a) - evStartMin(b));
+  const d = new Date(calSel + 'T00:00:00');
+  const isToday = calSel === dkey(new Date());
+  let html = `<div class="dayhead${isToday ? ' today' : ''}" style="margin-top:16px">${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}${isToday ? ' · Today' : ''}</div>`;
+  html += evs.length ? '<div class="rowlist">' + evs.map(ev => {
+    const tt = !ev.start.dateTime ? 'All day' : fmtTime(new Date(ev.start.dateTime)) +
+      (ev.end && ev.end.dateTime ? '<br>' + fmtTime(new Date(ev.end.dateTime)) : '');
+    return `<div class="ev"><span class="et">${tt}</span><span class="dot"></span><span class="es">${esc(ev.summary || '(no title)')}</span></div>`;
+  }).join('') + '</div>'
+    : '<div class="empty" style="padding:22px 18px">No events this day. <a href="#" onclick="calNewForm();return false">Add one</a></div>';
+  $('dayPanel').innerHTML = html;
 }
 function calNewForm() {
   if (!gtokValid()) { gAuth(calView); return; }
   const f = $('calform');
   if (!f || f.innerHTML) { if (f) f.innerHTML = ''; return; }
-  const today = dkey(new Date());
-  f.innerHTML = `<div class="card addform">
+  const today = calSel || dkey(new Date());
+  f.innerHTML = `<div class="card addform" style="margin-top:14px">
     <input type="text" id="evTitle" placeholder="Event title">
     <div class="frow"><input type="date" id="evDate" value="${today}">
       <label><input type="checkbox" id="evAllday" style="width:17px;height:17px;vertical-align:-3px;accent-color:var(--accent)"> All day</label></div>
@@ -1184,12 +1279,22 @@ if (DEMO) {
   };
   saveFile = async (p, text) => { files[p] = text; return 'demo'; };
   const now = new Date();
-  const at = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.toISOString(); };
-  gcalList = async () => [
-    { summary: 'Chess lesson with Nathanael', start: { dateTime: at(16, 0) }, end: { dateTime: at(17, 0) } },
-    { summary: 'Bondue camp briefing', start: { date: dkey(now) }, end: { date: dkey(now) } },
-    { summary: 'Gym', start: { dateTime: at(19, 30) }, end: { dateTime: at(20, 30) } },
+  const onDay = (off, h, m) => { const d = new Date(); d.setDate(d.getDate() + off); d.setHours(h, m, 0, 0); return d.toISOString(); };
+  const dayOff = off => { const d = new Date(); d.setDate(d.getDate() + off); return dkey(d); };
+  const DEMO_EVENTS = [
+    { summary: 'Chess lesson with Nathanael', start: { dateTime: onDay(0, 16, 0) }, end: { dateTime: onDay(0, 17, 0) } },
+    { summary: 'Bondue camp briefing', start: { date: dayOff(0) } },
+    { summary: 'Gym', start: { dateTime: onDay(0, 19, 30) }, end: { dateTime: onDay(0, 20, 30) } },
+    { summary: 'FA weekly sweep', start: { dateTime: onDay(2, 9, 0) }, end: { dateTime: onDay(2, 10, 0) } },
+    { summary: 'Chess lesson with Ray', start: { dateTime: onDay(3, 15, 0) }, end: { dateTime: onDay(3, 16, 0) } },
+    { summary: 'Bondue camp', start: { date: dayOff(7) }, end: { date: dayOff(10) } },
+    { summary: 'Dentist', start: { dateTime: onDay(-4, 11, 0) }, end: { dateTime: onDay(-4, 11, 30) } },
+    { summary: 'Bass practice', start: { dateTime: onDay(5, 20, 0) }, end: { dateTime: onDay(5, 21, 0) } },
   ];
+  gcalList = async (t0, t1) => DEMO_EVENTS.filter(ev => {
+    const s = new Date(ev.start.dateTime || ev.start.date + 'T00:00:00');
+    return s >= t0 && s < t1;
+  });
   gtaskLists = async () => (taskLists = [{ id: '1', title: 'My Tasks' }, { id: '2', title: 'Uni' }], taskListId = taskListId || '1', taskLists);
   gtasksList = async () => [
     { id: 'a', title: 'Submit matriculation form', due: now.toISOString() },
