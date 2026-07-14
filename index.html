@@ -280,7 +280,7 @@
   .set .stat { font-size: 13.5px; margin-top: 8px; }
   .set .stat.ok { color: var(--ok); }
 
-  /* ---------- concept map (Mind Mirror, embedded) ---------- */
+  /* ---------- concept map (Aegis, embedded) ---------- */
   .mapview { position: fixed; top: 53px; left: 0; right: 0;
     bottom: calc(52px + env(safe-area-inset-bottom)); z-index: 1; background: var(--bg); }
   .mapview iframe { width: 100%; height: 100%; border: 0; display: block; }
@@ -488,7 +488,7 @@ async function renderMaps() {
   }
   try {
     const dirs = await ghGet('learning');
-    const topics = (Array.isArray(dirs) ? dirs : []).filter(e => e.type === 'dir' && e.name !== 'mind-mirror');
+    const topics = (Array.isArray(dirs) ? dirs : []).filter(e => e.type === 'dir' && e.name !== 'aegis');
     el.innerHTML = topics.length
       ? '<div class="rowlist">' + topics.map(t =>
         `<a href="#/map/${encodeURIComponent(t.name)}">
@@ -963,8 +963,8 @@ async function udemyView(path) {
   build();
 }
 
-/* =============== concept map (Mind Mirror, embedded) =============== */
-/* The Mind Mirror engine is loaded unchanged from the monorepo into a same-origin
+/* =============== concept map (Aegis, embedded) =============== */
+/* The Aegis engine is loaded unchanged from the monorepo into a same-origin
    srcdoc iframe. PA Mobile owns all GitHub I/O: it injects the map, debounces
    commits of Jeremy's edits, and polls for the agent's drip-fed concepts. */
 function blankMapObj(topic) {
@@ -997,8 +997,8 @@ async function mapView(topic) {
     gone = true; clearInterval(pollTimer); clearTimeout(commitTimer);
     // best-effort final flush of the latest live map (covers "edit then immediately leave")
     const cw = frame && frame.contentWindow;
-    if (localDirty && cw && cw.mindMirror) {
-      saveFile(mapPath, JSON.stringify(cw.mindMirror.getMap(), null, 2), curSha || undefined, 'mind-mirror: map edit').catch(() => {});
+    if (localDirty && cw && cw.aegis) {
+      saveFile(mapPath, JSON.stringify(cw.aegis.getMap(), null, 2), curSha || undefined, 'aegis: map edit').catch(() => {});
     }
   };
 
@@ -1010,17 +1010,17 @@ async function mapView(topic) {
   async function doCommit() {
     if (!frame || gone) return;
     if (committing) { localDirty = true; return; }   // a commit is in flight; it picks up new edits
-    const cw0 = frame.contentWindow; if (!cw0 || !cw0.mindMirror) return;
+    const cw0 = frame.contentWindow; if (!cw0 || !cw0.aegis) return;
     committing = true; clearTimeout(commitTimer);
     try {
       for (let attempt = 0; attempt < 4; attempt++) {
-        const cwa = frame && frame.contentWindow; if (!cwa || !cwa.mindMirror) break;
+        const cwa = frame && frame.contentWindow; if (!cwa || !cwa.aegis) break;
         localDirty = false;
-        const localMap = cwa.mindMirror.getMap();
+        const localMap = cwa.aegis.getMap();
         let sha = null, err = null;
         try {
           sha = await saveFile(mapPath, JSON.stringify(localMap, null, 2), curSha || undefined,
-                               attempt ? 'mind-mirror: map edit (merged)' : 'mind-mirror: map edit');
+                               attempt ? 'aegis: map edit (merged)' : 'aegis: map edit');
         } catch (e) { err = e; }
         if (sha) { curSha = sha; break; }            // saved (edits during the await left localDirty true)
         // 409 stale-sha update (sha null) or 422 concurrent-create (thrown): reconcile + retry.
@@ -1028,10 +1028,10 @@ async function mapView(topic) {
         if (!remote) { if (err) { toast('Map save failed: ' + err.message); localDirty = true; } break; }
         curSha = remote.sha;
         const cw2 = frame && frame.contentWindow;
-        const live = (cw2 && cw2.mindMirror) ? cw2.mindMirror.getMap() : localMap;   // keep edits made during the await
+        const live = (cw2 && cw2.aegis) ? cw2.aegis.getMap() : localMap;   // keep edits made during the await
         const merged = mergeMaps(JSON.parse(remote.text), live);
-        if (!gone && cw2 && cw2.mindMirror) cw2.mindMirror.loadMap(merged);
-        toast("Merged Mind Mirror's updates");
+        if (!gone && cw2 && cw2.aegis) cw2.aegis.loadMap(merged);
+        toast("Merged Aegis's updates");
         if (attempt === 3) { localDirty = true; toast('Map is busy syncing; will retry on your next edit.'); }
       }
     } finally { committing = false; }
@@ -1044,12 +1044,12 @@ async function mapView(topic) {
       const j = await ghGet(mapPath);
       if (localDirty || committing || gone) return;  // an edit or commit began while the GET was in flight
       if (!j || !j.sha || j.sha === curSha) return;
-      const cw = frame && frame.contentWindow; if (!cw || !cw.mindMirror) return;
+      const cw = frame && frame.contentWindow; if (!cw || !cw.aegis) return;
       const remote = JSON.parse(b64decode(j.content));
-      const before = cw.mindMirror.getMap();
+      const before = cw.aegis.getMap();
       const fresh = remote.nodes.filter(n => !before.nodes.some(o => o.id === n.id)).length;
-      curSha = j.sha; cw.mindMirror.loadMap(remote);
-      toast('Mind Mirror updated the map' + (fresh ? ': ' + fresh + ' new concept' + (fresh > 1 ? 's' : '') : ''));
+      curSha = j.sha; cw.aegis.loadMap(remote);
+      toast('Aegis updated the map' + (fresh ? ': ' + fresh + ' new concept' + (fresh > 1 ? 's' : '') : ''));
     } catch (e) { /* 404 (no file yet) or transient: ignore */ }
     finally { polling = false; }
   }
@@ -1057,7 +1057,7 @@ async function mapView(topic) {
   let engineText, mapObj;
   try {
     const [eng, mp] = await Promise.all([
-      loadFile('learning/mind-mirror/index.html'),
+      loadFile('learning/aegis/index.html'),
       loadFile(mapPath).catch(() => null),          // no map yet -> start empty, first edit creates it
     ]);
     engineText = eng.text;
@@ -1072,15 +1072,15 @@ async function mapView(topic) {
 
   const host = $('mapwrap'); if (!host) return; host.innerHTML = '';
   frame = document.createElement('iframe');
-  frame.name = 'mind-mirror-embed';                       // engine reads this to enter embed mode
+  frame.name = 'aegis-embed';                       // engine reads this to enter embed mode
   frame.title = topic + ' concept map';
   host.appendChild(frame);
   frame.onload = () => {
     if (gone) return;                                // torn down before the engine finished loading
     const cw = frame.contentWindow;
-    if (!cw || !cw.mindMirror) { const h = $('mapwrap'); if (h) h.innerHTML = '<p class="err" style="padding:20px">Map engine failed to load.</p>'; return; }
-    cw.mindMirror.loadMap(mapObj);
-    cw.mindMirror.setOnChange(scheduleCommit);
+    if (!cw || !cw.aegis) { const h = $('mapwrap'); if (h) h.innerHTML = '<p class="err" style="padding:20px">Map engine failed to load.</p>'; return; }
+    cw.aegis.loadMap(mapObj);
+    cw.aegis.setOnChange(scheduleCommit);
     pollTimer = setInterval(pollRemote, 5000);
   };
   frame.srcdoc = engineText;
