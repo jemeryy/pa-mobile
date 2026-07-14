@@ -184,6 +184,9 @@
   .u-blk textarea { font-size: 15px; }
   .u-blk textarea.mono { font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
     color: var(--muted); }
+  .u-cols { display: grid; grid-template-columns: minmax(280px, 420px) 1fr;
+    gap: 0 20px; align-items: start; }
+  @media (max-width: 780px) { .u-cols { grid-template-columns: 1fr; } }
   .board { aspect-ratio: 16/9; background: #17181b; color: #f2f2ef;
     border: 1px solid #2c2d31; border-radius: 8px; margin-top: 10px;
     padding: 5% 6%; display: flex; flex-direction: column; justify-content: center;
@@ -276,6 +279,11 @@
   .set .card p { margin: 4px 0 10px; color: var(--muted); font-size: 13.5px; }
   .set .stat { font-size: 13.5px; margin-top: 8px; }
   .set .stat.ok { color: var(--ok); }
+
+  /* ---------- concept map (Mind Mirror, embedded) ---------- */
+  .mapview { position: fixed; top: 53px; left: 0; right: 0;
+    bottom: calc(52px + env(safe-area-inset-bottom)); z-index: 1; background: var(--bg); }
+  .mapview iframe { width: 100%; height: 100%; border: 0; display: block; }
 </style>
 </head>
 <body>
@@ -397,6 +405,7 @@ function drawTabs() {
 }
 const UDEMY_RE = /^projects\/udemy-course\/scripts\/[^/]+\.md$/;
 let leaveGuard = null;   // {check, dirty, hash} set by views with unsaved state
+let mapCleanup = null;   // teardown (poll timer + final flush) set by the map view
 let suppressRoute = false;
 async function route() {
   if (suppressRoute) { suppressRoute = false; return; }
@@ -404,11 +413,13 @@ async function route() {
     suppressRoute = true; location.hash = leaveGuard.hash; return;
   }
   leaveGuard = null;
+  if (mapCleanup) { mapCleanup(); mapCleanup = null; }
   drawTabs();
   window.scrollTo(0, 0);
   if (!token && !DEMO) return tokenView();
   const h = decodeURIComponent(location.hash);
   try {
+    if (h.startsWith('#/map/')) return await mapView(h.slice(6));
     if (h.startsWith('#/raw/')) return await rawView(h.slice(6));
     if (h.startsWith('#/p/')) {
       const path = h.slice(4);
@@ -454,7 +465,9 @@ async function homeView() {
     <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
     <div id="todaycard"></div>
     <div class="sect">Pages</div>
-    <div id="pages">${skels(6)}</div>`;
+    <div id="pages">${skels(6)}</div>
+    <div class="sect">Learning maps</div>
+    <div id="maps">${skels(2)}</div>`;
   renderTodayCard();
   try {
     const pages = JSON.parse((await loadFile('phone/pages.json')).text);
@@ -463,6 +476,27 @@ async function homeView() {
         <span class="ric">${p.icon || '&#128196;'}</span>
         <span class="rtx">${esc(p.title)}</span><span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>';
   } catch (e) { $('pages').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  renderMaps();
+}
+async function renderMaps() {
+  const el = $('maps'); if (!el) return;
+  if (DEMO) {
+    el.innerHTML = `<div class="rowlist"><a href="#/map/statistics">
+      <span class="ric">&#128506;</span><span class="rtx">Statistics map</span>
+      <span class="chev">${ICONS.chev}</span></a></div>`;
+    return;
+  }
+  try {
+    const dirs = await ghGet('learning');
+    const topics = (Array.isArray(dirs) ? dirs : []).filter(e => e.type === 'dir' && e.name !== 'mind-mirror');
+    el.innerHTML = topics.length
+      ? '<div class="rowlist">' + topics.map(t =>
+        `<a href="#/map/${encodeURIComponent(t.name)}">
+          <span class="ric">&#128506;</span>
+          <span class="rtx">${esc(t.name.charAt(0).toUpperCase() + t.name.slice(1))} map</span>
+          <span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>'
+      : '<div class="empty">No maps yet.</div>';
+  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 async function renderTodayCard() {
   const el = $('todaycard');
@@ -770,7 +804,7 @@ async function rawSave() {
 
 /* =============== Udemy script view =============== */
 const WPM = 145;
-const ANIM_RE = /^anim:\s?/, VIS_RE = /^(visual:|action:)/;
+const ANIM_RE = /^anim:\s?/, VIS_RE = /^(visual:|action:)/, RES_RE = /^resource:\s?/;
 function uParse(text) {
   const lines = text.split('\n');
   const out = [];
@@ -787,11 +821,12 @@ function uParse(text) {
   return out.map(s => {
     if (s.kind === 'prose') return { kind: 'prose', text: s.lines.join('\n') };
     const anim = s.lines.filter(l => ANIM_RE.test(l)).map(l => l.replace(ANIM_RE, ''));
+    const res = s.lines.filter(l => RES_RE.test(l)).map(l => l.replace(RES_RE, ''));
     const vis = s.lines.filter(l => VIS_RE.test(l));
-    const narr = s.lines.filter(l => !ANIM_RE.test(l) && !VIS_RE.test(l));
+    const narr = s.lines.filter(l => !ANIM_RE.test(l) && !VIS_RE.test(l) && !RES_RE.test(l));
     while (narr.length && !narr[0].trim()) narr.shift();
     while (narr.length && !narr[narr.length - 1].trim()) narr.pop();
-    return { kind: 'block', marker: s.marker, visual: vis.join('\n'), narr: narr.join('\n'), anim: anim.join('\n') };
+    return { kind: 'block', marker: s.marker, visual: vis.join('\n'), narr: narr.join('\n'), anim: anim.join('\n'), res: res.join('\n') };
   });
 }
 function uSerialize(segs) {
@@ -800,6 +835,7 @@ function uSerialize(segs) {
     const out = [s.marker];
     out.push(...s.visual.split('\n').filter(l => l.trim()));
     out.push(...s.anim.split('\n').filter(l => l.trim()).map(l => 'anim: ' + l.trim()));
+    out.push(...(s.res || '').split('\n').filter(l => l.trim()).map(l => 'resource: ' + l.trim()));
     const narr = s.narr.replace(/\s+$/, '');
     if (narr.trim()) { out.push(''); out.push(...narr.split('\n')); }
     out.push('');
@@ -871,26 +907,29 @@ async function udemyView(path) {
       const card = document.createElement('div'); card.className = 'u-blk';
       const isDemo = seg.marker.startsWith('[DEMO');
       card.innerHTML = `<div><span class="u-mark${isDemo ? ' demo' : ''}">${esc(seg.marker)}</span><span class="u-stats"></span></div>
-        <div class="uprev"></div>`;
+        <div class="u-cols"><div class="u-left"><div class="uprev"></div></div><div class="u-right"></div></div>`;
       const prev = card.querySelector('.uprev');
+      const left = card.querySelector('.u-left');
+      const rightCol = card.querySelector('.u-right');
       const stats = card.querySelector('.u-stats');
       const refresh = () => {
         const w = narrWords(seg.narr);
         stats.textContent = w + ' words · ~' + fmtDur(w);
         uPreview(seg, prev);
       };
-      const mkField = (lbl, cls, val, key, ph) => {
+      const mkField = (parent, lbl, cls, val, key, ph) => {
         const l = document.createElement('div'); l.className = 'u-lbl' + (key === 'anim' ? ' anim' : ''); l.textContent = lbl;
         const ta = document.createElement('textarea'); if (cls) ta.className = cls;
         ta.value = val; ta.placeholder = ph || '';
         ta.addEventListener('input', () => { seg[key] = ta.value; markDirty(); fit(ta); refresh(); if (key === 'narr') totals(); });
-        card.appendChild(l); card.appendChild(ta);
+        parent.appendChild(l); parent.appendChild(ta);
         requestAnimationFrame(() => fit(ta));
       };
-      mkField(isDemo ? 'Action (on screen)' : 'Visual (on the slide)', 'mono', seg.visual, 'visual',
+      mkField(left, isDemo ? 'Action (on screen)' : 'Visual (on the slide)', 'mono', seg.visual, 'visual',
         isDemo ? 'action: what happens on screen' : 'visual: what is drawn');
-      mkField('Animation plan', '', seg.anim, 'anim', 'What draws in, keyed to the narration');
-      mkField('Narration (spoken + captions)', '', seg.narr, 'narr', 'What the voice says over this slide');
+      mkField(left, 'Animation plan', '', seg.anim, 'anim', 'What draws in, keyed to the narration');
+      mkField(left, 'Resources (for students)', 'mono', seg.res, 'res', 'One per line: file, link, or note to include with this lesson');
+      mkField(rightCol, 'Narration (spoken + captions)', '', seg.narr, 'narr', 'What the voice says over this slide');
       root.appendChild(card);
       refresh();
     });
@@ -922,6 +961,129 @@ async function udemyView(path) {
     segs = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
   };
   build();
+}
+
+/* =============== concept map (Mind Mirror, embedded) =============== */
+/* The Mind Mirror engine is loaded unchanged from the monorepo into a same-origin
+   srcdoc iframe. PA Mobile owns all GitHub I/O: it injects the map, debounces
+   commits of Jeremy's edits, and polls for the agent's drip-fed concepts. */
+function blankMapObj(topic) {
+  return { version: 1, meta: { topic, created: '', nudges: [] }, nodes: [], edges: [] };
+}
+/* Agent appends only unplaced tray nodes + nudges; Jeremy owns placements, edges,
+   notes. On a conflict, keep everything of his and graft the agent's appends on.
+   Only unplaced remote-only nodes are grafted: a placed node missing locally means
+   Jeremy deleted it, so we must not resurrect it from the agent's older copy. */
+function mergeMaps(remote, local) {
+  const out = JSON.parse(JSON.stringify(local));
+  const have = new Set(out.nodes.map(n => n.id));
+  for (const n of (remote.nodes || [])) if (n.unplaced && !have.has(n.id)) out.nodes.push(n);
+  const localDone = new Map((local.meta.nudges || []).map(g => [g.id, !!g.done]));
+  const rn = (remote.meta && remote.meta.nudges) || [];
+  out.meta.nudges = rn.map(g => ({ ...g, done: localDone.has(g.id) ? localDone.get(g.id) : !!g.done }));
+  return out;
+}
+async function mapView(topic) {
+  setHeader(topic.charAt(0).toUpperCase() + topic.slice(1) + ' map', { back: true });
+  $('main').innerHTML = '<div class="mapview" id="mapwrap"><p class="muted" style="padding:20px">Loading map…</p></div>';
+  const mapPath = 'learning/' + topic + '/map.json';
+  const myHash = location.hash;
+  let frame = null, commitTimer = null, pollTimer = null;
+  let localDirty = false, committing = false, polling = false, gone = false, curSha;
+
+  // Registered BEFORE the async loads so navigating away mid-load cancels this view
+  // instead of letting a stale mapView() mutate the next route.
+  mapCleanup = () => {
+    gone = true; clearInterval(pollTimer); clearTimeout(commitTimer);
+    // best-effort final flush of the latest live map (covers "edit then immediately leave")
+    const cw = frame && frame.contentWindow;
+    if (localDirty && cw && cw.mindMirror) {
+      saveFile(mapPath, JSON.stringify(cw.mindMirror.getMap(), null, 2), curSha || undefined, 'mind-mirror: map edit').catch(() => {});
+    }
+  };
+
+  function scheduleCommit() { if (gone) return; localDirty = true; clearTimeout(commitTimer); commitTimer = setTimeout(doCommit, 1200); }
+  // Serialized commit. Each attempt re-snapshots the LIVE map (Jeremy may edit during an
+  // await) and clears localDirty at snapshot time, so an edit made after that re-sets the
+  // flag and reschedules. On a conflict it merges the agent's file into the LIVE map, never
+  // a stale copy, so no in-flight edit is dropped.
+  async function doCommit() {
+    if (!frame || gone) return;
+    if (committing) { localDirty = true; return; }   // a commit is in flight; it picks up new edits
+    const cw0 = frame.contentWindow; if (!cw0 || !cw0.mindMirror) return;
+    committing = true; clearTimeout(commitTimer);
+    try {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const cwa = frame && frame.contentWindow; if (!cwa || !cwa.mindMirror) break;
+        localDirty = false;
+        const localMap = cwa.mindMirror.getMap();
+        let sha = null, err = null;
+        try {
+          sha = await saveFile(mapPath, JSON.stringify(localMap, null, 2), curSha || undefined,
+                               attempt ? 'mind-mirror: map edit (merged)' : 'mind-mirror: map edit');
+        } catch (e) { err = e; }
+        if (sha) { curSha = sha; break; }            // saved (edits during the await left localDirty true)
+        // 409 stale-sha update (sha null) or 422 concurrent-create (thrown): reconcile + retry.
+        const remote = await loadFile(mapPath).catch(() => null);
+        if (!remote) { if (err) { toast('Map save failed: ' + err.message); localDirty = true; } break; }
+        curSha = remote.sha;
+        const cw2 = frame && frame.contentWindow;
+        const live = (cw2 && cw2.mindMirror) ? cw2.mindMirror.getMap() : localMap;   // keep edits made during the await
+        const merged = mergeMaps(JSON.parse(remote.text), live);
+        if (!gone && cw2 && cw2.mindMirror) cw2.mindMirror.loadMap(merged);
+        toast("Merged Mind Mirror's updates");
+        if (attempt === 3) { localDirty = true; toast('Map is busy syncing; will retry on your next edit.'); }
+      }
+    } finally { committing = false; }
+    if (localDirty && !gone) scheduleCommit();        // edits arrived mid-commit -> run again
+  }
+  async function pollRemote() {
+    if (localDirty || committing || polling || gone) return;   // defer to any in-flight edit/commit/poll
+    polling = true;
+    try {
+      const j = await ghGet(mapPath);
+      if (localDirty || committing || gone) return;  // an edit or commit began while the GET was in flight
+      if (!j || !j.sha || j.sha === curSha) return;
+      const cw = frame && frame.contentWindow; if (!cw || !cw.mindMirror) return;
+      const remote = JSON.parse(b64decode(j.content));
+      const before = cw.mindMirror.getMap();
+      const fresh = remote.nodes.filter(n => !before.nodes.some(o => o.id === n.id)).length;
+      curSha = j.sha; cw.mindMirror.loadMap(remote);
+      toast('Mind Mirror updated the map' + (fresh ? ': ' + fresh + ' new concept' + (fresh > 1 ? 's' : '') : ''));
+    } catch (e) { /* 404 (no file yet) or transient: ignore */ }
+    finally { polling = false; }
+  }
+
+  let engineText, mapObj;
+  try {
+    const [eng, mp] = await Promise.all([
+      loadFile('learning/mind-mirror/index.html'),
+      loadFile(mapPath).catch(() => null),          // no map yet -> start empty, first edit creates it
+    ]);
+    engineText = eng.text;
+    if (mp) { mapObj = JSON.parse(mp.text); curSha = mp.sha; }
+    else { mapObj = blankMapObj(topic); curSha = undefined; }
+  } catch (e) {
+    if (gone || location.hash !== myHash) return;
+    const w = $('mapwrap'); if (w) w.innerHTML = `<p class="err" style="padding:20px">${esc(e.message)}</p>`;
+    return;
+  }
+  if (gone || location.hash !== myHash) return;      // navigated away while loading
+
+  const host = $('mapwrap'); if (!host) return; host.innerHTML = '';
+  frame = document.createElement('iframe');
+  frame.name = 'mind-mirror-embed';                       // engine reads this to enter embed mode
+  frame.title = topic + ' concept map';
+  host.appendChild(frame);
+  frame.onload = () => {
+    if (gone) return;                                // torn down before the engine finished loading
+    const cw = frame.contentWindow;
+    if (!cw || !cw.mindMirror) { const h = $('mapwrap'); if (h) h.innerHTML = '<p class="err" style="padding:20px">Map engine failed to load.</p>'; return; }
+    cw.mindMirror.loadMap(mapObj);
+    cw.mindMirror.setOnChange(scheduleCommit);
+    pollTimer = setInterval(pollRemote, 5000);
+  };
+  frame.srcdoc = engineText;
 }
 
 /* =============== Google layer =============== */
@@ -1265,7 +1427,7 @@ if (DEMO) {
       { title: 'Plans', path: 'plans', icon: '\u{1F5FA}' },
     ]),
     'context/current-priorities.md': '# Current priorities\n\n*Last updated: 2026-07-11*\n\n1. **SMU on-ramp** - matriculation admin, camps, Term 1 launch.\n2. **FARA** - make fara.sg profitable.\n\n## This week\n\n- [x] Matriculation forms\n- [ ] Book Bondue camp slot\n- [ ] FA weekly sweep review\n\nSome closing paragraph with a [link](../uni/roadmap.md) and `code`.\n',
-    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min) [slides]\n\nTarget: 3-4 min.\n\n[SLIDE 0.1-01]\nvisual: Dark canvas. Course title handwritten in white, centre.\nvisual: Three small doodles under it, one-word labels.\nanim: Title writes itself as the narration opens.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\n[DEMO 0.1-02]\naction: Show messy handwritten notes, then the clean output.\nanim: Zoom into the checklist.\n\nWatch what I do here, because every technique gets its own lesson later.\n',
+    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min) [slides]\n\nTarget: 3-4 min.\n\n[SLIDE 0.1-01]\nvisual: Dark canvas. Course title handwritten in white, centre.\nvisual: Three small doodles under it, one-word labels.\nanim: Title writes itself as the narration opens.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\n[DEMO 0.1-02]\naction: Show messy handwritten notes, then the clean output.\nanim: Zoom into the checklist.\nresource: prompt-cheatsheet.pdf\n\nWatch what I do here, because every technique gets its own lesson later.\n',
   };
   loadFile = async path => ({ path, sha: 'demo',
     text: files[path] || '# ' + path.split('/').pop().replace(/\.md$/, '') + '\n\nDemo file.\n\n- [ ] item one\n- [x] item two\n' });
