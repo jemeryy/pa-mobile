@@ -405,7 +405,7 @@ function drawTabs() {
 }
 const UDEMY_RE = /^projects\/udemy-course\/scripts\/[^/]+\.md$/;
 let leaveGuard = null;   // {check, dirty, hash} set by views with unsaved state
-let mapCleanup = null;   // teardown (poll timer + final flush) set by the map view
+let viewCleanup = null;  // teardown a view registers (map poll timer, voice-dump mic) run on next route
 let suppressRoute = false;
 async function route() {
   if (suppressRoute) { suppressRoute = false; return; }
@@ -413,7 +413,7 @@ async function route() {
     suppressRoute = true; location.hash = leaveGuard.hash; return;
   }
   leaveGuard = null;
-  if (mapCleanup) { mapCleanup(); mapCleanup = null; }
+  if (viewCleanup) { viewCleanup(); viewCleanup = null; }
   drawTabs();
   window.scrollTo(0, 0);
   if (!token && !DEMO) return tokenView();
@@ -951,18 +951,64 @@ async function refreshWeeklyCalendar() {
 }
 
 /* =============== voice dump (inflow) =============== */
+let dumpRecog = null;  // active SpeechRecognition while recording; null when idle
 function dumpView() {
   setHeader('Voice dump', { back: true });
+  const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   $('main').innerHTML = `
-    <p class="muted" style="margin:2px 4px 12px">Tap the mic on your keyboard and ramble. Saved to your inbox for the assistant to sort into memory, tasks, and notes next session.</p>
-    <textarea id="dumpta" placeholder="End-of-day thoughts, ideas, reminders&hellip;" style="height:52vh"></textarea>
-    <div style="display:flex;gap:10px;margin-top:12px">
+    <p class="muted" style="margin:2px 4px 12px">Tap Record and ramble, or just type. Saved to your inbox for the assistant to sort into memory, tasks, and notes next session.</p>
+    <textarea id="dumpta" placeholder="End-of-day thoughts, ideas, reminders&hellip;" style="height:46vh"></textarea>
+    <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+      <button class="ghost" id="dumprec" onclick="dumpRec()"${supported ? '' : ' disabled'}>&#127908; ${supported ? 'Record' : 'Voice unsupported'}</button>
+      <span id="dumpdot" style="display:none;color:var(--danger);font-size:14px;animation:pulse 1.2s ease-in-out infinite">&#9679; listening&hellip;</span>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
       <button class="primary" onclick="dumpSave()">Save to inbox</button>
       <button class="ghost" onclick="history.back()">Cancel</button>
     </div>`;
-  const ta = $('dumpta'); ta.focus();
+  const ta = $('dumpta');
   const dirty = () => ta.value.trim().length > 0;
   leaveGuard = { check: () => !dirty() || confirm('Discard this unsaved dump?'), dirty, hash: '#/dump' };
+  viewCleanup = dumpStopRec;   // navigating away must stop the mic
+}
+function dumpRec() {
+  if (dumpRecog) { dumpStopRec(); return; }                 // toggle off
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  const ta = $('dumpta');
+  let base = ta.value.replace(/\s+$/, '');                  // committed text; interim is appended live
+  if (base) base += ' ';
+  const rec = new SR();
+  rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
+  let stopped = false;
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) base += t.trim() + ' '; else interim += t;
+    }
+    ta.value = base + interim; ta.scrollTop = ta.scrollHeight;
+  };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      stopped = true; toast('Mic blocked. Allow microphone access.');
+    }
+    // 'no-speech'/'aborted' just end the turn; onend restarts if still recording
+  };
+  rec.onend = () => {                                        // iOS ends on silence; restart so long rambles continue
+    if (!stopped && dumpRecog === rec) { try { rec.start(); return; } catch (e) {} }
+    if (dumpRecog === rec) dumpStopRec();
+  };
+  dumpRecog = rec;
+  try { rec.start(); } catch (e) { dumpRecog = null; toast('Could not start mic.'); return; }
+  $('dumprec').innerHTML = '&#9209;&#65039; Stop';
+  $('dumpdot').style.display = 'inline';
+}
+function dumpStopRec() {
+  const rec = dumpRecog; dumpRecog = null;
+  if (rec) { try { rec.onend = null; rec.stop(); } catch (e) {} }
+  const b = $('dumprec'); if (b) b.innerHTML = '&#127908; Record';
+  const d = $('dumpdot'); if (d) d.style.display = 'none';
 }
 async function dumpSave() {
   const text = $('dumpta').value.trim();
@@ -1189,7 +1235,7 @@ async function mapView(topic) {
 
   // Registered BEFORE the async loads so navigating away mid-load cancels this view
   // instead of letting a stale mapView() mutate the next route.
-  mapCleanup = () => {
+  viewCleanup = () => {
     gone = true; clearInterval(pollTimer); clearTimeout(commitTimer);
     // best-effort final flush of the latest live map (covers "edit then immediately leave")
     const cw = frame && frame.contentWindow;
