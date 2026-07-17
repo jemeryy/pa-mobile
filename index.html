@@ -424,6 +424,7 @@ async function route() {
     if (h.startsWith('#/lessons/')) return await lessonsView(h.slice(10));
     if (h.startsWith('#/lesson/')) return await lessonView(h.slice(9));
     if (h.startsWith('#/map/')) return await mapView(h.slice(6));
+    if (h.startsWith('#/viz/')) return await lessonView(h.slice(6));   // viz reuse the self-contained-HTML renderer
     if (h.startsWith('#/raw/')) return await rawView(h.slice(6));
     if (h === '#/dump') return dumpView();
     if (h.startsWith('#/p/')) {
@@ -477,6 +478,8 @@ async function homeView() {
     </div>
     <div class="sect">Pages</div>
     <div id="pages">${skels(6)}</div>
+    <div class="sect">Visualisations</div>
+    <div id="viz">${skels(2)}</div>
     <div class="sect">Learning</div>
     <div id="maps">${skels(2)}</div>`;
   renderTodayCard();
@@ -487,7 +490,31 @@ async function homeView() {
         <span class="ric">${p.icon || '&#128196;'}</span>
         <span class="rtx">${esc(p.title)}</span><span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>';
   } catch (e) { $('pages').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  renderViz();
   renderMaps();
+}
+/* visualise skill publishes self-contained HTML here; date-prefixed filenames sort newest-first */
+async function renderViz() {
+  const el = $('viz'); if (!el) return;
+  if (DEMO) {
+    el.innerHTML = `<div class="rowlist"><a href="#/viz/phone/viz/2026-07-17-investment-pipeline.html">
+      <span class="ric">&#128202;</span><span class="rtx">Investment pipeline</span>
+      <span class="chev">${ICONS.chev}</span></a></div>`;
+    return;
+  }
+  try {
+    const entries = await ghGet('phone/viz').catch(() => []);
+    const files = (Array.isArray(entries) ? entries : [])
+      .filter(e => e.type === 'file' && e.name.endsWith('.html'))
+      .sort((a, b) => b.name.localeCompare(a.name));
+    el.innerHTML = files.length
+      ? '<div class="rowlist">' + files.map(f =>
+        `<a href="#/viz/${encodeURIComponent(f.path)}">
+          <span class="ric">&#128202;</span>
+          <span class="rtx">${esc(lessonTitle(f.name))}</span>
+          <span class="chev">${ICONS.chev}</span></a>`).join('') + '</div>'
+      : '<div class="empty">No visualisations yet.</div>';
+  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 async function renderMaps() {
   const el = $('maps'); if (!el) return;
@@ -523,7 +550,7 @@ function subjectView(name) {
 }
 /* lessons: the teach skill's HTML lessons in learning/<topic>/lessons/ */
 function lessonTitle(file) {
-  return file.replace(/\.html$/, '').replace(/^\d+-/, '').replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
+  return file.replace(/\.html$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/^\d+-/, '').replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
 }
 async function lessonsView(topic) {
   setHeader(topic.charAt(0).toUpperCase() + topic.slice(1) + ' lessons', { back: true });
