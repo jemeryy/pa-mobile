@@ -87,6 +87,14 @@
   .rowlist .rtx { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rowlist .chev { color: var(--muted); flex-shrink: 0; opacity: .6; }
   .rowlist .rtx.two { white-space: normal; line-height: 1.35; }
+  .lrow { cursor: pointer; }
+  .lrow .lbox { width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+    border: 2px solid var(--line); display: flex; align-items: center;
+    justify-content: center; font-size: 14px; color: transparent; }
+  .lrow .lbox svg { width: 15px; height: 15px; }
+  .lrow.done .lbox { background: #16a34a; border-color: #16a34a; color: #fff; }
+  .lrow.done .ltx { color: var(--muted); }
+  .lrow[disabled] { opacity: .55; }
   .sect { font-size: 13px; font-weight: 650; color: var(--muted);
     margin: 22px 4px 8px; }
   .muted { color: var(--muted); font-size: 14px; }
@@ -797,6 +805,14 @@ async function projView(key) {
         t.href ? `<a class="ghost" style="flex:1 1 46%;text-align:center" href="${esc(t.href)}">${esc(t.label)}</a>`
                : `<button class="${t.style === 'ghost' ? 'ghost' : 'primary'}" data-tap="${i}">${esc(t.label)}</button>`
       ).join('')}</div>`);
+    if (st.lessons && (st.lessons.items || []).length) {
+      const L = st.lessons, done = L.items.filter(i => i.taught).length;
+      parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught</div>
+        <div class="rowlist">${L.items.map((it, i) =>
+          `<button class="lrow${it.taught ? ' done' : ''}" data-les="${i}">
+             <span class="lbox">${ICONS.check || '✓'}</span>
+             <span class="ltx two">${esc(it.title)}</span></button>`).join('')}</div>`);
+    }
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map(j =>
         `<div><span class="jl">${esc(j.label || j.skill)}</span>${jobChip(j.state)}</div>`).join('')}</div>`);
@@ -816,6 +832,38 @@ async function projView(key) {
     $('main').querySelectorAll('[data-tap]').forEach(b => { b.onclick = () => fire(st.one_tap[+b.dataset.tap], b); });
     $('main').querySelectorAll('[data-row]').forEach(b => { b.onclick = () => fire(st.rest[+b.dataset.row].action, b); });
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
+    $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
+  }
+  /* Recompute the one-tap button from taught progress: a fully-taught package
+     means the next move is planning the next 10; otherwise build the next lesson.
+     Mirrors tools/chess/tick_lesson.py + the update_state pass. */
+  function lessonButton() {
+    const L = st.lessons, student = key.replace(/^chess\./, '');
+    const next = (L.items.find(i => !i.taught) || {}).n;
+    return next == null
+      ? [{ label: 'Plan next 10', skill: 'plan-chess-package', args: { student } }]
+      : [{ label: 'Build L' + next, skill: 'build-chess-lesson', args: { student, lesson: next } }];
+  }
+  /* Tick/untick a lesson: flip taught, refresh the button, persist the state
+     file. The Google Doc's ✅ is reconciled by tools/chess/tick_lesson.py (the
+     box can't write Docs); this owns the record the phone and that script read. */
+  async function toggleLesson(i, btn) {
+    const it = st.lessons.items[i]; if (!it) return;
+    it.taught = !it.taught;
+    st.one_tap = lessonButton();
+    btn.disabled = true;
+    try {
+      await persistLessons();
+      render();
+      toast(it.taught ? `Lesson ${it.n} ticked` : `Lesson ${it.n} unticked`);
+    } catch (e) { it.taught = !it.taught; st.one_tap = lessonButton(); toast(e.message); render(); }
+  }
+  async function persistLessons() {
+    if (DEMO) return;
+    const f = await loadFile(STATE_PATH(key));
+    const state = JSON.parse(f.text);
+    state.lessons = st.lessons; state.one_tap = st.one_tap;
+    await saveFile(STATE_PATH(key), JSON.stringify(state, null, 2) + '\n', f.sha, 'phone: tick lesson');
   }
   /* Resolve a needs_you card: run its action (a note to the agent, maybe a
      skill), then clear it from this page's state file AND the home feed so it
