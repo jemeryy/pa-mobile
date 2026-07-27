@@ -339,6 +339,32 @@
     background: var(--bg); border-top: 1px solid var(--line); }
   .chatbar textarea { flex: 1; max-height: 120px; border-radius: 18px; padding: 9px 14px; }
   .chatbar .primary { border-radius: 18px; padding: 9px 16px; flex-shrink: 0; }
+  /* model + effort pickers, one compact row at the top of a chat */
+  .chatopts { display: flex; gap: 8px; margin-bottom: 12px; }
+  .chatopts select { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    font: inherit; font-size: 13px; font-weight: 550; }
+
+  /* ---------- chat sidebar (drawer) ---------- */
+  #drawer { position: fixed; inset: 0; z-index: 50; visibility: hidden; }
+  #drawer.open { visibility: visible; }
+  .drawer-back { position: absolute; inset: 0; background: rgba(0,0,0,.45);
+    opacity: 0; transition: opacity .2s ease-out; }
+  #drawer.open .drawer-back { opacity: 1; }
+  .drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: 84%;
+    max-width: 340px; background: var(--bg); box-shadow: var(--shadow);
+    display: flex; flex-direction: column; overflow-y: auto; padding: 12px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+    transform: translateX(-100%); transition: transform .22s ease-out; }
+  #drawer.open .drawer-panel { transform: translateX(0); }
+  .drawer-hd { display: flex; align-items: center; justify-content: space-between;
+    font-weight: 650; font-size: 17px; padding: 4px 6px 12px; flex-shrink: 0; }
+  #drawer-list { flex: 1; }
+  #drawer-list .rowlist a.cur { background: var(--accent-soft); }
+  .drawer-home { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    padding: 13px 10px; border-top: 1px solid var(--line); color: var(--ink);
+    font-weight: 550; flex-shrink: 0; }
+  .drawer-home svg { width: 20px; height: 20px; }
 
   /* ---------- concept map (Aegis, embedded) ---------- */
   .mapview { position: fixed; top: 53px; left: 0; right: 0;
@@ -368,6 +394,7 @@ const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.3 12.3l2.5 2.5 4.9-5.4"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08A1.7 1.7 0 0 0 10.1 3.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08c.26.63.87 1.05 1.56 1.06H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.05z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7m3 0v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
@@ -443,9 +470,13 @@ async function saveFile(path, text, sha, msg) {
 function setHeader(title, opts = {}) {
   $('htitle').textContent = title;
   const back = $('hback');
-  back.style.display = opts.back ? '' : 'none';
-  back.innerHTML = ICONS.back;
-  back.onclick = () => history.length > 1 ? history.back() : (location.hash = '');
+  if (opts.left) {                       // a view can own the left button (e.g. chat's menu)
+    back.style.display = ''; back.innerHTML = ICONS[opts.left.icon]; back.onclick = opts.left.fn;
+  } else {
+    back.style.display = opts.back ? '' : 'none';
+    back.innerHTML = ICONS.back;
+    back.onclick = () => history.length > 1 ? history.back() : (location.hash = '');
+  }
   const act = $('hactions'); act.innerHTML = '';
   (opts.actions || []).forEach(a => {
     const b = document.createElement('button');
@@ -467,6 +498,7 @@ const UDEMY_RE = /^projects\/udemy-course\/scripts\/[^/]+\.md$/;
 let leaveGuard = null;   // {check, dirty, hash} set by views with unsaved state
 let viewCleanup = null;  // teardown a view registers (map poll timer, chat mic) run on next route
 let suppressRoute = false;
+let booted = false;      // first route of a page load: a reopened chat starts fresh
 async function route() {
   if (suppressRoute) { suppressRoute = false; return; }
   if (leaveGuard && !leaveGuard.check()) {
@@ -474,9 +506,13 @@ async function route() {
   }
   leaveGuard = null;
   if (viewCleanup) { viewCleanup(); viewCleanup = null; }
+  closeDrawer();
   drawTabs();
   window.scrollTo(0, 0);
   if (!token && !DEMO) return tokenView();
+  // Reopening or reloading while parked in a chat lands on a fresh one, not the
+  // stale thread (chatbot habit); the old chat stays reachable from the sidebar.
+  if (!booted) { booted = true; if (location.hash.startsWith('#/chat/')) return newChat(); }
   const h = decodeURIComponent(location.hash);
   try {
     if (h.startsWith('#/weekly')) return await openWeeklyPlan();
@@ -487,7 +523,7 @@ async function route() {
     if (h === '#/viz') return await vizListView();
     if (h.startsWith('#/viz/')) return await lessonView(h.slice(6));   // viz reuse the self-contained-HTML renderer
     if (h.startsWith('#/raw/')) return await rawView(h.slice(6));
-    if (h === '#/chat') return await chatListView();
+    if (h === '#/chat') return newChat();   // "Talk to Agent" always opens a fresh chat
     if (h.startsWith('#/chat/')) return await chatView(h.slice(7));
     if (h.startsWith('#/proj/')) return await projView(h.slice(7));
     if (h.startsWith('#/p/')) {
@@ -884,9 +920,9 @@ function ago(ts) {
 function chatParse(text) {
   return text.split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
 }
-function chatMsg(role, text) {
+function chatMsg(role, text, extra) {
   return { id: 'm-' + Math.random().toString(16).slice(2, 12), role,
-           ts: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), text };
+           ts: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), text, ...(extra || {}) };
 }
 const DEMO_CHAT = [
   { id: 'm-1', role: 'user', text: 'How is the lesson build going?' },
@@ -909,52 +945,84 @@ function speak(text) {
   u.rate = 1.05;
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
-/* Chat list: every mailbox/chat/*.jsonl is one saved conversation. The agent
-   loop already answers any thread, so a new chat is just a new file. */
+/* Chats: every mailbox/chat/*.jsonl is one saved conversation. The agent loop
+   already answers any thread, so a new chat is just a new file. History lives in
+   a slide-out sidebar (the drawer); a new chat opens on "Talk to Agent". */
 function newChat() { location.hash = '#/chat/c-' + Date.now().toString(36); }
-async function chatListView() {
-  setHeader('Chats', { back: true });
-  $('main').innerHTML = skels(4);
-  const render = metas => {
-    metas.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
-    const rows = metas.length ? '<div class="rowlist">' + metas.map(m =>
-      `<a href="#/chat/${encodeURIComponent(m.thread)}">
-        <span class="ric">&#128172;</span>
-        <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
-        <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span></a>`).join('') + '</div>'
-      : '<div class="empty">No chats yet. Tap New chat to start one.</div>';
-    $('main').innerHTML = `<button class="bigbtn wide" style="margin-bottom:14px" onclick="newChat()">
-      <span class="em">&#10133;</span>New chat</button>` + rows;
-  };
-  if (DEMO) return render([
-    { thread: 'main', title: 'How is the lesson build going?', preview: 'You: Yes, start on 13', ts: nowIso() }]);
-  try {
-    const entries = await ghGet('mailbox/chat').catch(() => []);
-    const files = (Array.isArray(entries) ? entries : []).filter(e => e.type === 'file' && e.name.endsWith('.jsonl'));
-    const metas = await Promise.all(files.map(async f => {
-      const thread = f.name.replace(/\.jsonl$/, '');
-      try {
-        const msgs = chatParse(b64decode((await ghGet(f.path)).content));
-        const last = msgs[msgs.length - 1];
-        return { thread, title: chatTitle(msgs), ts: last ? last.ts : '',
-          preview: last ? (last.role === 'user' ? 'You: ' : '') + String(last.text || '').replace(/\s+/g, ' ').slice(0, 60) : '' };
-      } catch (e) { return { thread, title: thread, ts: '', preview: '' }; }
-    }));
-    if (location.hash !== '#/chat') return;            // navigated away while loading
-    render(metas);
-  } catch (e) { $('main').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+
+/* One meta per saved chat (title, preview, time), newest first. Shared by the
+   drawer; each chat is one extra file read, fine for a personal-scale mailbox. */
+async function chatMetas() {
+  if (DEMO) return [{ thread: 'main', title: 'How is the lesson build going?',
+    preview: 'You: Yes, start on 13', ts: nowIso() }];
+  const entries = await ghGet('mailbox/chat').catch(() => []);
+  const files = (Array.isArray(entries) ? entries : []).filter(e => e.type === 'file' && e.name.endsWith('.jsonl'));
+  const metas = await Promise.all(files.map(async f => {
+    const thread = f.name.replace(/\.jsonl$/, '');
+    try {
+      const msgs = chatParse(b64decode((await ghGet(f.path)).content));
+      const last = msgs[msgs.length - 1];
+      return { thread, title: chatTitle(msgs), ts: last ? last.ts : '',
+        preview: last ? (last.role === 'user' ? 'You: ' : '') + String(last.text || '').replace(/\s+/g, ' ').slice(0, 60) : '' };
+    } catch (e) { return { thread, title: thread, ts: '', preview: '' }; }
+  }));
+  return metas.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+}
+
+function closeDrawer() { const d = $('drawer'); if (d) d.classList.remove('open'); }
+async function openDrawer(current) {
+  let d = $('drawer');
+  if (!d) {
+    d = document.createElement('div'); d.id = 'drawer';
+    d.innerHTML = '<div class="drawer-back"></div><aside class="drawer-panel"></aside>';
+    document.body.appendChild(d);
+    d.querySelector('.drawer-back').onclick = closeDrawer;
+  }
+  d.querySelector('.drawer-panel').innerHTML =
+    `<div class="drawer-hd">Chats<button class="txtbtn" onclick="closeDrawer();newChat()">+ New</button></div>
+     <div id="drawer-list">${skels(4)}</div>
+     <a class="drawer-home" href="#/" onclick="closeDrawer()">${ICONS.home}<span>Home</span></a>`;
+  d.classList.add('open');
+  const metas = await chatMetas();
+  const list = $('drawer-list'); if (!list) return;
+  list.innerHTML = metas.length ? '<div class="rowlist">' + metas.map(m =>
+    `<a href="#/chat/${encodeURIComponent(m.thread)}" class="${m.thread === current ? 'cur' : ''}" onclick="closeDrawer()">
+      <span class="ric">&#128172;</span>
+      <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
+      <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span></a>`).join('') + '</div>'
+    : '<div class="empty">No other chats yet.</div>';
+}
+
+/* Model + effort the box runs a message with. Values map straight to the CLI's
+   --model / --effort; the pick persists so the next new chat inherits it. */
+const CHAT_MODELS = [['Sonnet 4.6', 'claude-sonnet-4-6'], ['Sonnet 5', 'claude-sonnet-5'],
+  ['Opus 5', 'claude-opus-5'], ['Haiku 4.5', 'claude-haiku-4-5-20251001'],
+  ['Fable 5', 'claude-fable-5'], ['Opus 4.8', 'claude-opus-4-8']];
+const CHAT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+let selModel = localStorage.getItem('pa_model') || 'claude-sonnet-4-6';
+let selEffort = localStorage.getItem('pa_effort') || 'medium';
+function optSelect(id, pairs, cur) {
+  return `<select id="${id}">` + pairs.map(([lbl, val]) =>
+    `<option value="${val}"${val === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('') + '</select>';
 }
 async function chatView(thread) {
   const path = chatPath(thread);
-  const header = title => setHeader(title, { back: true, actions: [{
-    label: speakOn ? '🔊' : '🔇', fn: () => {
-      speakOn = !speakOn; localStorage.setItem('pa_speak', speakOn ? '1' : '0');
-      if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
-      toast(speakOn ? 'Replies will be read aloud' : 'Replies stay silent');
-      route();
-    } }] });
+  const header = title => setHeader(title, {
+    left: { icon: 'menu', fn: () => openDrawer(thread) },
+    actions: [
+      { icon: 'plus', label: 'New chat', fn: newChat },
+      { label: speakOn ? '🔊' : '🔇', fn: () => {
+        speakOn = !speakOn; localStorage.setItem('pa_speak', speakOn ? '1' : '0');
+        if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
+        toast(speakOn ? 'Replies will be read aloud' : 'Replies stay silent');
+        route();
+      } }] });
   header(thread === 'main' ? 'Agent' : 'Chat');
   $('main').innerHTML = `
+    <div class="chatopts">
+      ${optSelect('optmodel', CHAT_MODELS, selModel)}
+      ${optSelect('opteffort', CHAT_EFFORTS.map(e => [e[0].toUpperCase() + e.slice(1), e]), selEffort)}
+    </div>
     <div id="chatlog">${skels(3)}</div>
     <div style="height:60px"></div>
     <div class="chatbar">
@@ -962,6 +1030,8 @@ async function chatView(thread) {
       <textarea id="chatin" rows="1" placeholder="Type a message…"></textarea>
       <button class="primary" id="chatsend">Send</button>
     </div>`;
+  $('optmodel').onchange = e => { selModel = e.target.value; localStorage.setItem('pa_model', selModel); };
+  $('opteffort').onchange = e => { selEffort = e.target.value; localStorage.setItem('pa_effort', selEffort); };
   let msgs = [], text0 = '', sha, sending = false, gone = false, timer = null, rec = null;
   viewCleanup = () => {
     gone = true; clearInterval(timer);
@@ -997,7 +1067,7 @@ async function chatView(thread) {
     const ta = $('chatin'); const body = ta.value.trim();
     if (!body || sending) return;
     sending = true; ta.value = ''; ta.style.height = '';
-    const msg = chatMsg('user', body);
+    const msg = chatMsg('user', body, { model: selModel, effort: selEffort });
     msgs = msgs.concat(msg); render();
     if (DEMO) { sending = false; return; }
     const line = JSON.stringify(msg) + '\n';
