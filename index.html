@@ -808,10 +808,16 @@ async function projView(key) {
     if (st.lessons && (st.lessons.items || []).length) {
       const L = st.lessons, done = L.items.filter(i => i.taught).length;
       parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught</div>
-        <div class="rowlist">${L.items.map((it, i) =>
-          `<button class="lrow${it.taught ? ' done' : ''}" data-les="${i}">
+        <div class="rowlist">${L.items.map((it, i) => {
+          // tick = taught; Build = queue that lesson's build (any lesson, any order)
+          const row = `<button class="lrow${it.taught ? ' done' : ''}" data-les="${i}"
+             style="flex:1;min-width:0">
              <span class="lbox">${ICONS.check || '✓'}</span>
-             <span class="ltx two">${esc(it.title)}</span></button>`).join('')}</div>`);
+             <span class="ltx two">${esc(it.title)}</span></button>`;
+          return it.taught ? `<div>${row}</div>` : `<div>${row}
+            <button class="ghost" data-build="${i}"
+              style="padding:7px 12px;font-size:13.5px;flex-shrink:0">Build</button></div>`;
+        }).join('')}</div>`);
     }
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map(j =>
@@ -833,6 +839,11 @@ async function projView(key) {
     $('main').querySelectorAll('[data-row]').forEach(b => { b.onclick = () => fire(st.rest[+b.dataset.row].action, b); });
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
     $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
+    $('main').querySelectorAll('[data-build]').forEach(b => { b.onclick = () => {
+      const it = st.lessons.items[+b.dataset.build];
+      fire({ skill: 'build-chess-lesson', label: 'Build L' + it.n,
+             args: { student: key.replace(/^chess\./, ''), lesson: it.n } }, b);
+    }; });
   }
   /* Recompute the one-tap button from taught progress: a fully-taught package
      means the next move is planning the next 10; otherwise build the next lesson.
@@ -851,14 +862,20 @@ async function projView(key) {
     const it = st.lessons.items[i]; if (!it) return;
     it.taught = !it.taught;
     st.one_tap = lessonButton();
-    btn.disabled = true;
+    render();                                  // optimistic: the tap feels instant
     try {
       await persistLessons();
-      render();
       toast(it.taught ? `Lesson ${it.n} ticked` : `Lesson ${it.n} unticked`);
     } catch (e) { it.taught = !it.taught; st.one_tap = lessonButton(); toast(e.message); render(); }
   }
-  async function persistLessons() {
+  // Taps are optimistic, so two quick ticks would race on the same file sha:
+  // chain the writes, each one re-reading the sha it is writing against.
+  let saving = Promise.resolve();
+  function persistLessons() {
+    saving = saving.catch(() => {}).then(writeLessons);
+    return saving;
+  }
+  async function writeLessons() {
     if (DEMO) return;
     const f = await loadFile(STATE_PATH(key));
     const state = JSON.parse(f.text);
@@ -884,6 +901,12 @@ async function projView(key) {
         await appendChat(note ? `${said} — ${note}` : said);
         if (act.skill) await runSkill({ project: key, skill: act.skill, args: act.args || {}, label: act.label });
       }
+      // a review card can carry `tick: N`: passing review IS the done-tick, so
+      // flip the lesson taught here too (the chess-tick Action puts ✅ in the Doc).
+      if (act && act.tick != null && st.lessons) {
+        const it = (st.lessons.items || []).find(x => x.n === act.tick);
+        if (it) { it.taught = true; st.one_tap = lessonButton(); }
+      }
       st.needs_you.splice(ni, 1);
       await persistNeeds();
       await clearHomeAttention(item.title);
@@ -902,6 +925,7 @@ async function projView(key) {
     if (DEMO) return;
     const f = await loadFile(STATE_PATH(key));
     const state = JSON.parse(f.text); state.needs_you = st.needs_you;
+    if (st.lessons) { state.lessons = st.lessons; state.one_tap = st.one_tap; }
     await saveFile(STATE_PATH(key), JSON.stringify(state, null, 2) + '\n', f.sha, 'phone: resolve needs_you');
   }
   async function clearHomeAttention(title) {
@@ -915,6 +939,17 @@ async function projView(key) {
         await saveFile(HOME_PATH, JSON.stringify(home2, null, 2) + '\n', f.sha, 'phone: clear attention');
       }
     } catch (e) { /* best effort: the state file is already cleared */ }
+  }
+  /* The Work list reads home.json, which only the agent rewrites, so a job you
+     just queued would vanish on reload. Record it there too (best effort). */
+  async function addHomeJob(job) {
+    if (DEMO) return;
+    try {
+      const f = await loadFile(HOME_PATH);
+      const h = JSON.parse(f.text);
+      h.jobs = [job, ...(h.jobs || []).filter(j => j.id !== job.id)].slice(0, 20);
+      await saveFile(HOME_PATH, JSON.stringify(h, null, 2) + '\n', f.sha, 'phone: queue job');
+    } catch (e) { /* the job file is written; the agent will republish it */ }
   }
   async function fire(t, b) {
     let said = '';
@@ -937,6 +972,7 @@ async function projView(key) {
         const args = said ? Object.assign({}, t.args || {}, { input: said }) : (t.args || {});
         const job = await runSkill({ project: key, skill: t.skill, args, label: t.label });
         jobs.unshift(Object.assign({}, job, { state: 'queued' }));
+        addHomeJob(job);          // so it survives a reload before the agent rewrites home
         toast('Sent. Watch it under Work.');
       }
       render();
