@@ -713,6 +713,27 @@ function needsCards(items) {
     </div>`;
   }).join('');
 }
+/* A job parked at `awaiting_check` by tools/job_gate.py, rendered as the
+   decision itself: the question the build stopped on, one button per answer it
+   offered, and a link to the handoff it wrote (the preview, the reuse finding,
+   whatever he needs to judge it). Tapping an answer flips the job back to
+   `running` with that answer in `note`, which is what agent_loop.resume_prompt
+   hands to the build when it picks up again. Wired in projView. */
+/* mirrors DEFAULT_OPTIONS in tools/job_gate.py */
+const GATE_OPTIONS = ['Approve', { label: 'Ask for changes', ask: 'What should change?' }];
+function gateCards(list) {
+  return list.map((j, i) => {
+    const g = j.gate || {}, opts = (g.options || []).length ? g.options : GATE_OPTIONS;
+    return `<div class="card flag">
+      <div class="ttl">${esc(j.label || j.skill)}</div>
+      <div class="det">${esc(g.question || j.note || 'Waiting for your check.')}</div>
+      ${g.file ? `<div class="det" style="margin-top:6px"><a href="#/p/${encodeURIComponent(g.file)}">Read the detail</a></div>` : ''}
+      <div class="actrow" style="margin:10px 0 0">${opts.map((o, k) =>
+        `<button class="${k ? 'ghost' : 'primary'}" data-gate="${i}" data-opt="${k}"
+           style="flex:1 1 46%">${esc(typeof o === 'string' ? o : o.label)}</button>`).join('')}</div>
+    </div>`;
+  }).join('');
+}
 async function renderDashboard() {
   const el = $('dash'); if (!el) return;
   let home;
@@ -798,16 +819,29 @@ async function projView(key) {
       parts.push(`<div class="numgrid">${st.numbers.map(n => `<div class="num">
         <div class="v">${esc(n.value)}</div><div class="l">${esc(n.label)}</div>
         ${n.sub ? `<div class="s">${esc(n.sub)}</div>` : ''}</div>`).join('')}</div>`);
-    if ((st.needs_you || []).length)
-      parts.push(`<div class="sect">Needs you</div>${needsCards(st.needs_you)}`);
+    // A button that starts a skill already in flight goes dead: two
+    // build-chess-lesson runs would write the same manifest and the same doc.
+    // Blocked by SKILL, not by project, so a queued plan does not stop a build.
+    // Answering a gate is never blocked — that is how the running one moves on.
+    const gated = jobs.filter(j => j.state === 'awaiting_check' && j.gate);
+    const live = new Set(jobs.filter(j => j.state === 'queued' || j.state === 'running')
+                             .map(j => j.skill));
+    const BUSY = ' <span class="muted" style="font-weight:400">— already running</span>';
+    if (gated.length || (st.needs_you || []).length)
+      parts.push(`<div class="sect">Needs you</div>${gateCards(gated)}${needsCards(st.needs_you || [])}`);
     if ((st.one_tap || []).length)
-      parts.push(`<div class="sect">One tap</div><div class="actrow">${st.one_tap.map((t, i) =>
+      parts.push(`<div class="sect">One tap${
+        st.one_tap.some(t => t.skill && live.has(t.skill)) ? BUSY : ''
+        }</div><div class="actrow">${st.one_tap.map((t, i) =>
         t.href ? `<a class="ghost" style="flex:1 1 46%;text-align:center" href="${esc(t.href)}">${esc(t.label)}</a>`
-               : `<button class="${t.style === 'ghost' ? 'ghost' : 'primary'}" data-tap="${i}">${esc(t.label)}</button>`
+               : `<button class="${t.style === 'ghost' ? 'ghost' : 'primary'}" data-tap="${i}"${
+                   t.skill && live.has(t.skill) ? ' disabled' : ''}>${esc(t.label)}</button>`
       ).join('')}</div>`);
     if (st.lessons && (st.lessons.items || []).length) {
       const L = st.lessons, done = L.items.filter(i => i.taught).length;
-      parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught</div>
+      const building = live.has('build-chess-lesson');   // what the Build buttons queue
+      parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught${
+        building ? BUSY : ''}</div>
         <div class="rowlist">${L.items.map((it, i) => {
           // tick = taught; Build = queue that lesson's build (any lesson, any order)
           const row = `<button class="lrow${it.taught ? ' done' : ''}" data-les="${i}"
@@ -815,7 +849,7 @@ async function projView(key) {
              <span class="lbox">${ICONS.check || '✓'}</span>
              <span class="ltx two">${esc(it.title)}</span></button>`;
           return it.taught ? `<div>${row}</div>` : `<div>${row}
-            <button class="ghost" data-build="${i}"
+            <button class="ghost" data-build="${i}"${building ? ' disabled' : ''}
               style="padding:7px 12px;font-size:13.5px;flex-shrink:0">Build</button></div>`;
         }).join('')}</div>`);
     }
@@ -839,11 +873,34 @@ async function projView(key) {
     $('main').querySelectorAll('[data-row]').forEach(b => { b.onclick = () => fire(st.rest[+b.dataset.row].action, b); });
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
     $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
+    $('main').querySelectorAll('[data-gate]').forEach(b => {
+      b.onclick = () => answerGate(gated[+b.dataset.gate], +b.dataset.opt, b); });
     $('main').querySelectorAll('[data-build]').forEach(b => { b.onclick = () => {
       const it = st.lessons.items[+b.dataset.build];
       fire({ skill: 'build-chess-lesson', label: 'Build L' + it.n,
              args: { student: key.replace(/^chess\./, ''), lesson: it.n } }, b);
     }; });
+  }
+  /* Answer a parked job's gate. The option's label IS the answer the build
+     reads back; an option carrying `ask` collects the detail (what to change)
+     first. The flip to `running` is the gate: nothing moves until it commits. */
+  async function answerGate(job, k, btn) {
+    if (!job) return;
+    const opt = ((job.gate || {}).options || GATE_OPTIONS)[k];
+    if (!opt) return;
+    let note = typeof opt === 'string' ? opt : opt.label;
+    if (opt.ask) {
+      const v = prompt(opt.ask);
+      if (!v || !v.trim()) return;
+      note += ': ' + v.trim();
+    }
+    btn.disabled = true;
+    try {
+      await flipJob(job.id, 'running', { note });
+      job.state = 'running'; job.gate = null;      // off the card, into Work as running
+      render();
+      toast('Sent to the agent.');
+    } catch (e) { toast(e.message); btn.disabled = false; }
   }
   /* Recompute the one-tap button from taught progress: a fully-taught package
      means the next move is planning the next 10; otherwise build the next lesson.
