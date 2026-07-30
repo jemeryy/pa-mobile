@@ -681,7 +681,23 @@ async function flipJob(id, state, fields) {
   Object.assign(job, fields || {}, { state, updated: nowIso() });
   const sha = await saveFile(JOB_PATH(id), JSON.stringify(job, null, 2) + '\n', f.sha, 'phone: ' + state);
   if (!sha) throw new Error('The agent changed this job while you were looking. Pull to refresh.');
+  // Every list on the phone reads home.json, which only the agent rewrites, so a
+  // gate you just answered came back on the next reload for as long as the box
+  // took to notice — forever, the day the box's pull was broken (2026-07-30).
+  // The job file stays the truth (gate kept: that is how the box knows to resume).
+  await upsertHomeJob({ ...job, gate: null });
   return job;
+}
+/* Record a job in home.json so it survives a reload before the agent republishes
+   it (best effort: the job file is written either way). */
+async function upsertHomeJob(job) {
+  if (DEMO) return;
+  try {
+    const f = await loadFile(HOME_PATH);
+    const h = JSON.parse(f.text);
+    h.jobs = [job, ...(h.jobs || []).filter(j => j.id !== job.id)].slice(0, 20);
+    await saveFile(HOME_PATH, JSON.stringify(h, null, 2) + '\n', f.sha, 'phone: ' + job.state);
+  } catch (e) { /* the agent republishes home.json on its next pass */ }
 }
 async function loadHome() {
   if (DEMO) return DEMO_HOME;
@@ -997,17 +1013,6 @@ async function projView(key) {
       }
     } catch (e) { /* best effort: the state file is already cleared */ }
   }
-  /* The Work list reads home.json, which only the agent rewrites, so a job you
-     just queued would vanish on reload. Record it there too (best effort). */
-  async function addHomeJob(job) {
-    if (DEMO) return;
-    try {
-      const f = await loadFile(HOME_PATH);
-      const h = JSON.parse(f.text);
-      h.jobs = [job, ...(h.jobs || []).filter(j => j.id !== job.id)].slice(0, 20);
-      await saveFile(HOME_PATH, JSON.stringify(h, null, 2) + '\n', f.sha, 'phone: queue job');
-    } catch (e) { /* the job file is written; the agent will republish it */ }
-  }
   async function fire(t, b) {
     let said = '';
     if (t.ask) {
@@ -1029,7 +1034,7 @@ async function projView(key) {
         const args = said ? Object.assign({}, t.args || {}, { input: said }) : (t.args || {});
         const job = await runSkill({ project: key, skill: t.skill, args, label: t.label });
         jobs.unshift(Object.assign({}, job, { state: 'queued' }));
-        addHomeJob(job);          // so it survives a reload before the agent rewrites home
+        upsertHomeJob(job);       // so it survives a reload before the agent rewrites home
         toast('Sent. Watch it under Work.');
       }
       render();
