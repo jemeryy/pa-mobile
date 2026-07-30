@@ -341,38 +341,42 @@
   .bubble.ai .by { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
   .sysline { font-size: 13px; color: var(--muted); font-style: italic;
     margin: 6px 4px 10px; }
-  .chatbar { position: fixed; left: 0; right: 0; z-index: 25;
-    bottom: calc(52px + env(safe-area-inset-bottom));
-    display: flex; gap: 8px; align-items: flex-end; padding: 8px 12px;
-    background: var(--bg); border-top: 1px solid var(--line); }
-  .chatbar textarea { flex: 1; max-height: 120px; border-radius: 18px; padding: 9px 14px; }
-  .chatbar .primary { border-radius: 18px; padding: 9px 16px; flex-shrink: 0; }
   /* model + effort pickers, one compact row at the top of a chat */
   .chatopts { display: flex; gap: 8px; margin-bottom: 12px; }
   .chatopts select { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--surface); color: var(--ink);
     font: inherit; font-size: 13px; font-weight: 550; }
 
-  /* ---------- chat sidebar (drawer) ---------- */
-  #drawer { position: fixed; inset: 0; z-index: 50; visibility: hidden; }
-  #drawer.open { visibility: visible; }
-  .drawer-back { position: absolute; inset: 0; background: rgba(0,0,0,.45);
-    opacity: 0; transition: opacity .2s ease-out; }
-  #drawer.open .drawer-back { opacity: 1; }
-  .drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: 84%;
-    max-width: 340px; background: var(--bg); box-shadow: var(--shadow);
-    display: flex; flex-direction: column; overflow-y: auto; padding: 12px;
-    padding-top: calc(12px + env(safe-area-inset-top));
-    transform: translateX(-100%); transition: transform .22s ease-out; }
-  #drawer.open .drawer-panel { transform: translateX(0); }
-  .drawer-hd { display: flex; align-items: center; justify-content: space-between;
-    font-weight: 650; font-size: 17px; padding: 4px 6px 12px; flex-shrink: 0; }
-  #drawer-list { flex: 1; }
-  #drawer-list .rowlist a.cur { background: var(--accent-soft); }
-  .drawer-home { display: flex; align-items: center; gap: 10px; margin-top: 12px;
-    padding: 13px 10px; border-top: 1px solid var(--line); color: var(--ink);
-    font-weight: 550; flex-shrink: 0; }
-  .drawer-home svg { width: 20px; height: 20px; }
+  /* ---------- agent side panel ----------
+     The agent is a panel over the page, not a page of its own, so it survives
+     navigation and can be told "this page". Collapsed = the round button. */
+  #agentfab { position: fixed; right: 14px; z-index: 35;
+    bottom: calc(66px + env(safe-area-inset-bottom));
+    width: 52px; height: 52px; border-radius: 50%; border: none; font-size: 22px;
+    background: var(--accent); color: var(--accent-ink);
+    box-shadow: 0 3px 12px rgba(0,0,0,.24); }
+  body.agent-open #agentfab { display: none; }
+  body:has(.savebar) #agentfab { display: none; }   /* never sit on top of Save */
+  #agent { position: fixed; top: 0; bottom: 0; right: 0; z-index: 45;
+    width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,.16);
+    transform: translateX(101%); transition: transform .22s ease-out; }
+  body.agent-open #agent { transform: translateX(0); }
+  #agent .ahd { display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+    padding: 8px 4px 8px 8px; border-bottom: 1px solid var(--line);
+    padding-top: calc(8px + env(safe-area-inset-top)); }
+  #agent .ahd .atitle { flex: 1; font-weight: 650; font-size: 15.5px; padding: 0 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #agent .abody { flex: 1; overflow-y: auto; padding: 12px; }
+  #agent .abody .rowlist .cur { background: var(--accent-soft); }
+  #agent .afoot { flex-shrink: 0; display: flex; gap: 8px; align-items: flex-end;
+    border-top: 1px solid var(--line); padding: 8px 10px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  #agent .afoot textarea { flex: 1; max-height: 110px; border-radius: 18px; padding: 9px 14px; }
+  #agent .afoot .primary, #agent .afoot .ghost { border-radius: 18px; padding: 9px 14px; flex-shrink: 0; }
+  /* which page the next message will carry as context */
+  .pgctx { font-size: 12px; color: var(--muted); padding: 0 4px 8px; }
+  @media (min-width: 900px) { body.agent-open main { margin-right: min(94vw, 420px); } }
 
   /* ---------- concept map (Aegis, embedded) ---------- */
   .mapview { position: fixed; top: 53px; left: 0; right: 0;
@@ -388,6 +392,7 @@
 </header>
 <main id="main"></main>
 <nav id="tabbar"></nav>
+<button id="agentfab" aria-label="Open the agent" onclick="openAgent()">&#128172;</button>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -492,6 +497,7 @@ function setHeader(title, opts = {}) {
     else { b.className = 'txtbtn'; b.textContent = a.label; }
     b.onclick = a.fn; act.appendChild(b);
   });
+  showPage();     // every view lands here, so this is where the panel learns the page
 }
 function drawTabs() {
   const h = location.hash;
@@ -514,14 +520,19 @@ async function route() {
   }
   leaveGuard = null;
   if (viewCleanup) { viewCleanup(); viewCleanup = null; }
-  closeDrawer();
   drawTabs();
   window.scrollTo(0, 0);
   if (!token && !DEMO) return tokenView();
-  // Reopening or reloading while parked in a chat lands on a fresh one, not the
-  // stale thread (chatbot habit); the old chat stays reachable from the sidebar.
-  if (!booted) { booted = true; if (location.hash.startsWith('#/chat/')) return newChat(); }
   const h = decodeURIComponent(location.hash);
+  // The agent is a panel, not a page: an old #/chat link opens it over home.
+  if (h === '#/chat' || h.startsWith('#/chat/')) {
+    const t = h.startsWith('#/chat/') ? h.slice(7) : '';
+    suppressRoute = true; location.hash = '';
+    await homeView();
+    return openAgent(t || 'new');
+  }
+  // the panel survives a reload, on the same thread, so a page refresh is not a lost chat
+  if (!booted) { booted = true; if (localStorage.getItem('pa_agent') === '1') openAgent(); }
   try {
     if (h.startsWith('#/weekly')) return await openWeeklyPlan();
     if (h.startsWith('#/subject/')) return subjectView(h.slice(10));
@@ -531,8 +542,7 @@ async function route() {
     if (h === '#/viz') return await vizListView();
     if (h.startsWith('#/viz/')) return await lessonView(h.slice(6));   // viz reuse the self-contained-HTML renderer
     if (h.startsWith('#/raw/')) return await rawView(h.slice(6));
-    if (h === '#/chat') return newChat();   // "Talk to Agent" always opens a fresh chat
-    if (h.startsWith('#/chat/')) return await chatView(h.slice(7));
+    if (h.startsWith('#/gate/')) return await gateView(h.slice(7));
     if (h.startsWith('#/proj/')) return await projView(h.slice(7));
     if (h.startsWith('#/p/')) {
       const path = h.slice(4);
@@ -577,8 +587,8 @@ async function homeView() {
     <div class="greet">${greet}, Jeremy</div>
     <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
     <div class="rowlist" style="margin-bottom:16px">
-      <a href="#/chat"><span class="ric">&#128172;</span>
-      <span class="rtx">Talk to Agent</span><span class="chev">${ICONS.chev}</span></a>
+      <button onclick="openAgent('new')"><span class="ric">&#128172;</span>
+      <span class="rtx">Talk to Agent</span><span class="chev">${ICONS.chev}</span></button>
     </div>
     <div id="todaycard"></div>
     <div id="dash">${skels(3)}</div>
@@ -738,17 +748,63 @@ function needsCards(items) {
 /* mirrors DEFAULT_OPTIONS in tools/job_gate.py */
 const GATE_OPTIONS = ['Approve', { label: 'Ask for changes', ask: 'What should change?' }];
 function gateCards(list) {
-  return list.map((j, i) => {
-    const g = j.gate || {}, opts = (g.options || []).length ? g.options : GATE_OPTIONS;
+  return list.map(j => {
+    const g = j.gate || {};
     return `<div class="card flag">
       <div class="ttl">${esc(j.label || j.skill)}</div>
       <div class="det">${esc(g.question || j.note || 'Waiting for your check.')}</div>
-      ${g.file ? `<div class="det" style="margin-top:6px"><a href="#/p/${encodeURIComponent(g.file)}">Read the detail</a></div>` : ''}
-      <div class="actrow" style="margin:10px 0 0">${opts.map((o, k) =>
-        `<button class="${k ? 'ghost' : 'primary'}" data-gate="${i}" data-opt="${k}"
-           style="flex:1 1 46%">${esc(typeof o === 'string' ? o : o.label)}</button>`).join('')}</div>
+      <div class="actrow" style="margin:10px 0 0">
+        <a class="primary" style="flex:1;text-align:center"
+           href="#/gate/${encodeURIComponent(j.id)}">Review</a></div>
     </div>`;
   }).join('');
+}
+/* The decision on its own page: the question, the short review the build wrote
+   for it (`gate.review` — only what he must look at), then one button per answer.
+   Answering flips the job to `running` with that answer as its `note`, which is
+   what agent_loop.resume_prompt hands back to the build. The long resume handoff
+   (`gate.file`) is a link, not the thing he reads to decide. */
+async function gateView(id) {
+  setHeader('Review', { back: true });
+  $('main').innerHTML = skels(3);
+  let job;
+  try { job = JSON.parse((await loadFile(JOB_PATH(id))).text); }
+  catch (e) { $('main').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const g = job.gate || {};
+  setHeader(job.label || job.skill, { back: true });
+  if (job.state !== 'awaiting_check' || !g.question) {
+    $('main').innerHTML = '<div class="empty">Already answered.</div>';
+    return;
+  }
+  let md = g.review || '';
+  if (!md && g.file) md = await loadFile(g.file).then(f => f.text).catch(() => '');
+  const opts = (g.options || []).length ? g.options : GATE_OPTIONS;
+  $('main').innerHTML = `
+    <div class="card flag"><div class="ttl">${esc(g.question)}</div></div>
+    <div id="doc">${md ? (window.marked ? marked.parse(md) : `<pre>${esc(md)}</pre>`)
+                       : '<p class="muted">The build wrote no detail.</p>'}</div>
+    ${g.review && g.file ? `<p class="muted" style="margin-top:16px">
+      <a href="#/p/${encodeURIComponent(g.file)}">Full handoff</a></p>` : ''}
+    <div class="actrow" style="margin-top:18px">${opts.map((o, k) =>
+      `<button class="${k ? 'ghost' : 'primary'}" data-ans="${k}" style="flex:1 1 46%">${
+        esc(typeof o === 'string' ? o : o.label)}</button>`).join('')}</div>`;
+  $('main').querySelectorAll('[data-ans]').forEach(b => {
+    b.onclick = () => answer(opts[+b.dataset.ans], b); });
+
+  async function answer(opt, btn) {
+    let note = typeof opt === 'string' ? opt : opt.label;
+    if (opt.ask) {
+      const v = prompt(opt.ask);
+      if (!v || !v.trim()) return;
+      note += ': ' + v.trim();
+    }
+    btn.disabled = true;
+    try {
+      await flipJob(job.id, 'running', { note });
+      toast('Sent to the agent.');
+      history.length > 1 ? history.back() : (location.hash = '');
+    } catch (e) { toast(e.message); btn.disabled = false; }
+  }
 }
 async function renderDashboard() {
   const el = $('dash'); if (!el) return;
@@ -761,7 +817,7 @@ async function renderDashboard() {
     (att.length ? `<div class="sect">Needs your attention</div>${attentionCards(att)}` : '') +
     `<div class="sect">Do things</div>
      <div class="btngrid">
-       <a class="bigbtn wide" href="#/chat"><span class="em">&#128172;</span>Talk to Agent</a>
+       <button class="bigbtn wide" onclick="openAgent('new')"><span class="em">&#128172;</span>Talk to Agent</button>
        ${(home.projects || []).map(p => `<a class="bigbtn" href="#/proj/${encodeURIComponent(p.key)}">
          <span class="em">${p.icon || '&#128194;'}</span>${esc(p.title)}
          ${p.badge ? `<span class="badge">${p.badge}</span>` : ''}</a>`).join('')}
@@ -889,34 +945,11 @@ async function projView(key) {
     $('main').querySelectorAll('[data-row]').forEach(b => { b.onclick = () => fire(st.rest[+b.dataset.row].action, b); });
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
     $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
-    $('main').querySelectorAll('[data-gate]').forEach(b => {
-      b.onclick = () => answerGate(gated[+b.dataset.gate], +b.dataset.opt, b); });
     $('main').querySelectorAll('[data-build]').forEach(b => { b.onclick = () => {
       const it = st.lessons.items[+b.dataset.build];
       fire({ skill: 'build-chess-lesson', label: 'Build L' + it.n,
              args: { student: key.replace(/^chess\./, ''), lesson: it.n } }, b);
     }; });
-  }
-  /* Answer a parked job's gate. The option's label IS the answer the build
-     reads back; an option carrying `ask` collects the detail (what to change)
-     first. The flip to `running` is the gate: nothing moves until it commits. */
-  async function answerGate(job, k, btn) {
-    if (!job) return;
-    const opt = ((job.gate || {}).options || GATE_OPTIONS)[k];
-    if (!opt) return;
-    let note = typeof opt === 'string' ? opt : opt.label;
-    if (opt.ask) {
-      const v = prompt(opt.ask);
-      if (!v || !v.trim()) return;
-      note += ': ' + v.trim();
-    }
-    btn.disabled = true;
-    try {
-      await flipJob(job.id, 'running', { note });
-      job.state = 'running'; job.gate = null;      // off the card, into Work as running
-      render();
-      toast('Sent to the agent.');
-    } catch (e) { toast(e.message); btn.disabled = false; }
   }
   /* Recompute the one-tap button from taught progress: a fully-taught package
      means the next move is planning the next 10; otherwise build the next lesson.
@@ -1092,12 +1125,11 @@ function speak(text) {
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 /* Chats: every mailbox/chat/*.jsonl is one saved conversation. The agent loop
-   already answers any thread, so a new chat is just a new file. History lives in
-   a slide-out sidebar (the drawer); a new chat opens on "Talk to Agent". */
-function newChat() { location.hash = '#/chat/c-' + Date.now().toString(36); }
+   already answers any thread, so a new chat is just a new file. */
+function newThread() { return 'c-' + Date.now().toString(36); }
 
-/* One meta per saved chat (title, preview, time), newest first. Shared by the
-   drawer; each chat is one extra file read, fine for a personal-scale mailbox. */
+/* One meta per saved chat (title, preview, time), newest first. Each chat is one
+   extra file read, fine for a personal-scale mailbox. */
 async function chatMetas() {
   if (DEMO) return [{ thread: 'main', title: 'How is the lesson build going?',
     preview: 'You: Yes, start on 13', ts: nowIso() }];
@@ -1115,30 +1147,6 @@ async function chatMetas() {
   return metas.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
 }
 
-function closeDrawer() { const d = $('drawer'); if (d) d.classList.remove('open'); }
-async function openDrawer(current) {
-  let d = $('drawer');
-  if (!d) {
-    d = document.createElement('div'); d.id = 'drawer';
-    d.innerHTML = '<div class="drawer-back"></div><aside class="drawer-panel"></aside>';
-    document.body.appendChild(d);
-    d.querySelector('.drawer-back').onclick = closeDrawer;
-  }
-  d.querySelector('.drawer-panel').innerHTML =
-    `<div class="drawer-hd">Chats<button class="txtbtn" onclick="closeDrawer();newChat()">+ New</button></div>
-     <div id="drawer-list">${skels(4)}</div>
-     <a class="drawer-home" href="#/" onclick="closeDrawer()">${ICONS.home}<span>Home</span></a>`;
-  d.classList.add('open');
-  const metas = await chatMetas();
-  const list = $('drawer-list'); if (!list) return;
-  list.innerHTML = metas.length ? '<div class="rowlist">' + metas.map(m =>
-    `<a href="#/chat/${encodeURIComponent(m.thread)}" class="${m.thread === current ? 'cur' : ''}" onclick="closeDrawer()">
-      <span class="ric">&#128172;</span>
-      <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
-      <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span></a>`).join('') + '</div>'
-    : '<div class="empty">No other chats yet.</div>';
-}
-
 /* Model + effort the box runs a message with. Values map straight to the CLI's
    --model / --effort; the pick persists so the next new chat inherits it. */
 const CHAT_MODELS = [['Sonnet 4.6', 'claude-sonnet-4-6'], ['Sonnet 5', 'claude-sonnet-5'],
@@ -1151,113 +1159,185 @@ function optSelect(id, pairs, cur) {
   return `<select id="${id}">` + pairs.map(([lbl, val]) =>
     `<option value="${val}"${val === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('') + '</select>';
 }
-async function chatView(thread) {
-  const path = chatPath(thread);
-  const header = title => setHeader(title, {
-    left: { icon: 'menu', fn: () => openDrawer(thread) },
-    actions: [
-      { icon: 'plus', label: 'New chat', fn: newChat },
-      { label: speakOn ? '🔊' : '🔇', fn: () => {
-        speakOn = !speakOn; localStorage.setItem('pa_speak', speakOn ? '1' : '0');
-        if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
-        toast(speakOn ? 'Replies will be read aloud' : 'Replies stay silent');
-        route();
-      } }] });
-  header(thread === 'main' ? 'Agent' : 'Chat');
-  $('main').innerHTML = `
+/* The panel: one agent, always the same thread state, floating over any page.
+   It outlives routing on purpose (that is what lets a message say "this page"),
+   so it owns its own poll timer instead of the router's viewCleanup. */
+let agT = '', agMsgs = [], agSha, agText0 = '', agSending = false, agTimer = null, agRec = null;
+
+function agentOpen() { return document.body.classList.contains('agent-open'); }
+/* Which page he is looking at, as something the box can open: a repo path where
+   the page IS a file, otherwise just the title (Calendar, Tasks). */
+function pageRef() {
+  const h = decodeURIComponent(location.hash);
+  const title = ($('htitle').textContent || '').trim();
+  const tail = h.replace(/^#\/[a-z]+\//, '');
+  let path = '';
+  if (/^#\/(p|raw|lesson|viz)\//.test(h)) path = tail;
+  else if (h.startsWith('#/proj/')) path = STATE_PATH(tail);
+  else if (h.startsWith('#/gate/')) path = JOB_PATH(tail);
+  else if (!h || h === '#' || h === '#/') path = HOME_PATH;
+  return { title, path };
+}
+function showPage() {
+  const el = $('apgctx'); if (!el) return;
+  const p = pageRef();
+  el.textContent = p.path ? 'On: ' + p.path : p.title ? 'On: ' + p.title : '';
+}
+function agentShell() {
+  let el = $('agent');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'agent';
+  el.innerHTML = `
+    <div class="ahd">
+      <button class="iconbtn" id="aclose" aria-label="Collapse">${ICONS.chev}</button>
+      <div class="atitle" id="atitle">Agent</div>
+      <button class="iconbtn" id="alist" aria-label="Past chats">${ICONS.menu}</button>
+      <button class="iconbtn" id="anew" aria-label="New chat">${ICONS.plus}</button>
+      <button class="iconbtn" id="aspeak" aria-label="Read replies aloud">${speakOn ? '🔊' : '🔇'}</button>
+    </div>
+    <div class="abody" id="abody"></div>
+    <div class="afoot">
+      ${SpeechRec ? '<button class="ghost" id="chatmic" aria-label="Speak">&#127908;</button>' : ''}
+      <textarea id="chatin" rows="1" placeholder="Ask about this page…"></textarea>
+      <button class="primary" id="chatsend">Send</button>
+    </div>`;
+  document.body.appendChild(el);
+  $('aclose').onclick = closeAgent;
+  $('alist').onclick = showChats;
+  $('anew').onclick = () => openThread(newThread());
+  $('aspeak').onclick = () => {
+    speakOn = !speakOn; localStorage.setItem('pa_speak', speakOn ? '1' : '0');
+    if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
+    $('aspeak').textContent = speakOn ? '🔊' : '🔇';
+  };
+  $('chatsend').onclick = agSend;
+  const ta = $('chatin');
+  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 110) + 'px'; };
+  if (SpeechRec && $('chatmic')) $('chatmic').onclick = agMic;
+  return el;
+}
+/* thread: a thread id, 'new' for a fresh one, or nothing to reopen the last. */
+function openAgent(thread) {
+  agentShell();
+  document.body.classList.add('agent-open');
+  localStorage.setItem('pa_agent', '1');
+  const t = thread === 'new' ? newThread()
+          : thread || agT || sessionStorage.getItem('pa_thread') || newThread();
+  if (t !== agT || !agTimer) openThread(t); else showPage();
+}
+function closeAgent() {
+  document.body.classList.remove('agent-open');
+  localStorage.setItem('pa_agent', '0');
+  clearInterval(agTimer); agTimer = null;
+  if (agRec) { try { agRec.stop(); } catch (e) {} }
+  if (window.speechSynthesis) speechSynthesis.cancel();
+}
+async function openThread(t) {
+  agT = t; sessionStorage.setItem('pa_thread', t);
+  agMsgs = []; agSha = undefined; agText0 = '';
+  clearInterval(agTimer); agTimer = null;
+  $('atitle').textContent = 'Agent';
+  $('abody').innerHTML = `
     <div class="chatopts">
       ${optSelect('optmodel', CHAT_MODELS, selModel)}
       ${optSelect('opteffort', CHAT_EFFORTS.map(e => [e[0].toUpperCase() + e.slice(1), e]), selEffort)}
     </div>
-    <div id="chatlog">${skels(3)}</div>
-    <div style="height:60px"></div>
-    <div class="chatbar">
-      ${SpeechRec ? '<button class="ghost" id="chatmic" aria-label="Speak" style="border-radius:18px;padding:9px 12px">&#127908;</button>' : ''}
-      <textarea id="chatin" rows="1" placeholder="Type a message…"></textarea>
-      <button class="primary" id="chatsend">Send</button>
-    </div>`;
+    <div class="pgctx" id="apgctx"></div>
+    <div id="chatlog">${skels(2)}</div>`;
   $('optmodel').onchange = e => { selModel = e.target.value; localStorage.setItem('pa_model', selModel); };
   $('opteffort').onchange = e => { selEffort = e.target.value; localStorage.setItem('pa_effort', selEffort); };
-  let msgs = [], text0 = '', sha, sending = false, gone = false, timer = null, rec = null;
-  viewCleanup = () => {
-    gone = true; clearInterval(timer);
-    if (rec) { try { rec.stop(); } catch (e) {} }
-    if (window.speechSynthesis) speechSynthesis.cancel();
-  };
-
-  function render() {
-    const log = $('chatlog'); if (!log) return;
-    const waiting = msgs.length && msgs[msgs.length - 1].role === 'user';
-    log.innerHTML = (msgs.length
-      ? msgs.map(m => m.role === 'system' ? `<div class="sysline">${esc(m.text)}</div>`
-        : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
-        : `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
-             m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
-      : '<div class="empty">Ask your agent anything. It is always on.</div>')
-      + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
-    window.scrollTo(0, document.body.scrollHeight);
+  if (DEMO) { agMsgs = t === 'main' ? DEMO_CHAT : []; agRender(); return; }
+  const f = await loadFile(chatPath(t)).catch(() => null);
+  if (agT !== t) return;                                  // switched threads mid-load
+  if (f) { agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text); }
+  agRender();
+  agTimer = setInterval(agPoll, 5000);
+}
+function agRender() {
+  const log = $('chatlog'); if (!log) return;
+  const waiting = agMsgs.length && agMsgs[agMsgs.length - 1].role === 'user';
+  log.innerHTML = (agMsgs.length
+    ? agMsgs.map(m => m.role === 'system' ? `<div class="sysline">${esc(m.text)}</div>`
+      : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
+      : `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
+           m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
+    : '<div class="empty">Ask about this page, or anything else.</div>')
+    + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
+  if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
+  showPage();
+  const body = $('abody'); if (body) body.scrollTop = body.scrollHeight;
+}
+async function agPoll() {
+  if (!agentOpen() || agSending) return;
+  const t = agT;
+  try {
+    const j = await ghGet(chatPath(t));
+    if (agT !== t || agSending || !j || !j.sha || j.sha === agSha) return;
+    const before = agMsgs.length ? agMsgs[agMsgs.length - 1].id : null;
+    agSha = j.sha; agText0 = b64decode(j.content); agMsgs = chatParse(agText0); agRender();
+    const fresh = agMsgs.slice(agMsgs.findIndex(m => m.id === before) + 1);
+    const reply = fresh.filter(m => m.role === 'assistant').pop();
+    if (reply) speak(reply.text);
+  } catch (e) { /* 404 (no thread yet) or transient: ignore */ }
+}
+async function agSend() {
+  const ta = $('chatin'); const body = ta.value.trim();
+  if (!body || agSending) return;
+  agSending = true; ta.value = ''; ta.style.height = '';
+  // the page rides with the message: agent_loop names it in the prompt
+  const msg = chatMsg('user', body, { model: selModel, effort: selEffort, page: pageRef() });
+  agMsgs = agMsgs.concat(msg); agRender();
+  if (DEMO) { agSending = false; return; }
+  const path = chatPath(agT), line = JSON.stringify(msg) + '\n';
+  let saved = false;
+  for (let attempt = 0; attempt < 3 && !saved; attempt++) {
+    const base = agText0 && !agText0.endsWith('\n') ? agText0 + '\n' : agText0;
+    let newSha = null, err = null;
+    try { newSha = await saveFile(path, base + line, agSha, 'phone: chat message'); }
+    catch (e) { err = e; }
+    if (newSha) { agSha = newSha; agText0 = base + line; saved = true; break; }
+    // 409 stale sha or 422 concurrent create: the agent appended while we typed.
+    const f = await loadFile(path).catch(() => null);
+    if (!f) { toast('Send failed: ' + (err ? err.message : 'conflict')); break; }
+    agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text).concat(msg); agRender();
   }
-  async function poll() {
-    if (gone || sending) return;
-    try {
-      const j = await ghGet(path);
-      if (gone || sending || !j || !j.sha || j.sha === sha) return;
-      const before = msgs.length ? msgs[msgs.length - 1].id : null;
-      sha = j.sha; text0 = b64decode(j.content); msgs = chatParse(text0); render();
-      const fresh = msgs.slice(msgs.findIndex(m => m.id === before) + 1);
-      const reply = fresh.filter(m => m.role === 'assistant').pop();
-      if (reply) speak(reply.text);
-    } catch (e) { /* 404 (no thread yet) or transient: ignore */ }
-  }
-  async function send() {
-    const ta = $('chatin'); const body = ta.value.trim();
-    if (!body || sending) return;
-    sending = true; ta.value = ''; ta.style.height = '';
-    const msg = chatMsg('user', body, { model: selModel, effort: selEffort });
-    msgs = msgs.concat(msg); render();
-    if (DEMO) { sending = false; return; }
-    const line = JSON.stringify(msg) + '\n';
-    let saved = false;
-    for (let attempt = 0; attempt < 3 && !saved; attempt++) {
-      const base = text0 && !text0.endsWith('\n') ? text0 + '\n' : text0;
-      let newSha = null, err = null;
-      try { newSha = await saveFile(path, base + line, sha, 'phone: chat message'); }
-      catch (e) { err = e; }
-      if (newSha) { sha = newSha; text0 = base + line; saved = true; break; }
-      // 409 stale sha or 422 concurrent create: the agent appended while we typed.
-      const f = await loadFile(path).catch(() => null);
-      if (!f) { toast('Send failed: ' + (err ? err.message : 'conflict')); break; }
-      sha = f.sha; text0 = f.text; msgs = chatParse(f.text).concat(msg); render();
-    }
-    if (!saved) { msgs = msgs.filter(m => m.id !== msg.id); render(); toast('Not sent. Try again.'); }
-    sending = false;
-  }
-
+  if (!saved) { agMsgs = agMsgs.filter(m => m.id !== msg.id); agRender(); toast('Not sent. Try again.'); }
+  agSending = false;
+  if (!agTimer) agTimer = setInterval(agPoll, 5000);      // a brand-new thread starts polling
+}
+/* Past chats, in the panel: tapping one loads it without leaving the page. */
+async function showChats() {
+  const body = $('abody'); if (!body) return;
+  const head = '<div class="sect" style="margin:2px 4px 8px">Past chats</div>';
+  body.innerHTML = head + skels(3);
+  const metas = await chatMetas();
+  if (!$('abody')) return;
+  body.innerHTML = head + (metas.length
+    ? '<div class="rowlist">' + metas.map(m =>
+      `<button data-th="${esc(m.thread)}" class="${m.thread === agT ? 'cur' : ''}">
+        <span class="ric">&#128172;</span>
+        <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
+        <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span>
+      </button>`).join('') + '</div>'
+    : '<div class="empty">No chats yet.</div>');
+  body.querySelectorAll('[data-th]').forEach(b => { b.onclick = () => openThread(b.dataset.th); });
+}
+function agMic() {
   const ta = $('chatin');
-  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 120) + 'px'; };
-  $('chatsend').onclick = send;
-  if (SpeechRec && $('chatmic')) $('chatmic').onclick = () => {
-    if (rec) { rec.stop(); return; }                 // tap again to stop
-    rec = new SpeechRec();
-    rec.lang = 'en-SG'; rec.interimResults = true; rec.continuous = true;
-    const before = ta.value ? ta.value + ' ' : '';
-    rec.onresult = e => {
-      let heard = '';
-      for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
-      ta.value = before + heard; ta.oninput();
-    };
-    rec.onerror = e => { toast(e.error === 'not-allowed' ? 'Microphone is blocked in Settings' : 'Mic: ' + e.error); };
-    rec.onend = () => { rec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
-    rec.start();
-    $('chatmic').classList.add('danger');
+  if (agRec) { agRec.stop(); return; }                 // tap again to stop
+  agRec = new SpeechRec();
+  agRec.lang = 'en-SG'; agRec.interimResults = true; agRec.continuous = true;
+  const before = ta.value ? ta.value + ' ' : '';
+  agRec.onresult = e => {
+    let heard = '';
+    for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+    ta.value = before + heard; ta.oninput();
   };
-  if (DEMO) { msgs = DEMO_CHAT; render(); return; }
-  const f = await loadFile(path).catch(() => null);
-  if (gone) return;
-  if (f) { sha = f.sha; text0 = f.text; msgs = chatParse(f.text); }
-  header(chatTitle(msgs));
-  render();
-  timer = setInterval(poll, 5000);
+  agRec.onerror = e => { toast(e.error === 'not-allowed' ? 'Microphone is blocked in Settings' : 'Mic: ' + e.error); };
+  agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
+  agRec.start();
+  $('chatmic').classList.add('danger');
 }
 
 /* subject: Lessons + Aegis map */
