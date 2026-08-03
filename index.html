@@ -1252,7 +1252,7 @@ function agentShell() {
     <div class="abody" id="abody"></div>
     <div class="afoot">
       ${SpeechRec ? '<button class="ghost" id="chatmic" aria-label="Speak">&#127908;</button>' : ''}
-      <textarea id="chatin" rows="1" placeholder="Ask about this page…"></textarea>
+      <textarea id="chatin" rows="1" enterkeyhint="send" placeholder="Ask about this page…"></textarea>
       <button class="primary" id="chatsend">Send</button>
     </div>`;
   document.body.appendChild(el);
@@ -1267,10 +1267,18 @@ function agentShell() {
   $('chatsend').onclick = agSend;
   const ta = $('chatin');
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 110) + 'px'; };
-  // Enter sends, shift+enter (or the phone keyboard's return) writes a newline.
+  // Enter sends. Two paths on purpose: a hardware keyboard fires keydown, but a
+  // phone's on-screen keyboard often reports keydown as key 229 / Unidentified and
+  // only shows its intent as a beforeinput insertLineBreak. Catch both.
+  // Shift+enter still writes a newline (hardware only; phones have no shift).
   ta.onkeydown = e => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); agSend(); }
   };
+  ta.addEventListener('beforeinput', e => {
+    if (e.inputType === 'insertLineBreak' || (e.inputType === 'insertText' && e.data === '\n')) {
+      e.preventDefault(); agSend();
+    }
+  });
   if (SpeechRec && $('chatmic')) $('chatmic').onclick = agMic;
   return el;
 }
