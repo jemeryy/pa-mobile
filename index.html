@@ -1193,9 +1193,9 @@ async function chatMetas() {
     try {
       const msgs = chatParse(b64decode((await ghGet(f.path)).content));
       const last = msgs[msgs.length - 1];
-      return { thread, title: chatTitle(msgs), ts: last ? last.ts : '',
+      return { thread, sha: f.sha, title: chatTitle(msgs), ts: last ? last.ts : '',
         preview: last ? (last.role === 'user' ? 'You: ' : '') + String(last.text || '').replace(/\s+/g, ' ').slice(0, 60) : '' };
-    } catch (e) { return { thread, title: thread, ts: '', preview: '' }; }
+    } catch (e) { return { thread, sha: f.sha, title: thread, ts: '', preview: '' }; }
   }));
   return metas.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
 }
@@ -1398,9 +1398,26 @@ async function showChats() {
         <span class="ric">&#128172;</span>
         <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
         <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span>
+        <span data-del="${esc(m.thread)}" data-sha="${esc(m.sha || '')}" class="muted"
+              style="flex-shrink:0;margin-left:8px;padding:2px 8px;font-size:16px">&#128465;</span>
       </button>`).join('') + '</div>'
     : '<div class="empty">No chats yet.</div>');
   body.querySelectorAll('[data-th]').forEach(b => { b.onclick = () => openThread(b.dataset.th); });
+  body.querySelectorAll('[data-del]').forEach(x => {
+    x.onclick = async e => {
+      e.stopPropagation();
+      const t = x.dataset.del;
+      if (!confirm('Delete this chat? It cannot be undone from the phone.')) return;
+      try {
+        const r = await gh(chatPath(t), { method: 'DELETE', body: JSON.stringify({
+          message: 'phone: delete chat ' + t, sha: x.dataset.sha, branch: 'main' }) });
+        if (r.status === 409) return toast('Chat changed while you were looking, reopen the list');
+      } catch (err) { return toast(err.message); }
+      toast('Chat deleted');
+      if (t === agT) return openThread(newThread());
+      showChats();
+    };
+  });
 }
 function agMic() {
   const ta = $('chatin');
