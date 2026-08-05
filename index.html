@@ -914,9 +914,31 @@ async function projView(key) {
   }
   if (location.hash !== '#/proj/' + key && location.hash !== '#/proj/' + encodeURIComponent(key)) return;
   setHeader(st.title || key, { back: true });
-  // a drill-down job (chess.ray) belongs on its own page AND on its parent's
-  const jobs = (home.jobs || []).filter(j => j.project === key || (j.project || '').startsWith(key + '.'));
+  // a drill-down job (chess.ray) belongs on its own page AND on its parent's.
+  // `done` is dropped: a finished build is history, and a pile of them pushed the
+  // work actually in flight off the screen.
+  const mine = h => (h.jobs || []).filter(j => (j.project === key ||
+    (j.project || '').startsWith(key + '.')) && j.state !== 'done');
+  const jobs = mine(home);
+  await drillDownRows();
   render();
+  // Job state changes on the box, not here. Without this the page he left open
+  // still reads "in line" long after that build actually started.
+  if (!DEMO) {
+    const stamp = j => j.id + j.state, myHash = location.hash;
+    const poll = setInterval(async () => {
+      // a route that happened while this view was still loading owns viewCleanup
+      // now, so this timer has to be able to stop itself
+      if (location.hash !== myHash) return clearInterval(poll);
+      const f = await loadFile(HOME_PATH).catch(() => null);
+      if (!f) return;                               // blip: keep what is on screen
+      const fresh = mine(JSON.parse(f.text));
+      if (fresh.map(stamp).join() === jobs.map(stamp).join()) return;
+      jobs.length = 0; jobs.push(...fresh);
+      render();
+    }, 15000);
+    viewCleanup = () => clearInterval(poll);
+  }
 
   function render() {
     const parts = [];
@@ -924,46 +946,52 @@ async function projView(key) {
       parts.push(`<div class="numgrid">${st.numbers.map(n => `<div class="num">
         <div class="v">${esc(n.value)}</div><div class="l">${esc(n.label)}</div>
         ${n.sub ? `<div class="s">${esc(n.sub)}</div>` : ''}</div>`).join('')}</div>`);
-    // A button that starts a skill already in flight goes dead: two
-    // build-chess-lesson runs would write the same manifest and the same doc.
-    // Blocked by SKILL, not by project, so a queued plan does not stop a build.
-    // Answering a gate is never blocked — that is how the running one moves on.
+    // A button that starts a skill already in flight is REPLACED by that job's
+    // state chip: two build-chess-lesson runs would write the same manifest and
+    // the same doc. Blocked by SKILL, not by project, so a queued plan does not
+    // stop a build. Answering a gate is never blocked (a gate button has no
+    // `skill`) — that is how the running one moves on.
     const gated = jobs.filter(j => j.state === 'awaiting_check' && j.gate);
     // Visibility is inclusive (a child's gate shows on the parent too), but the
-    // disable is per-TARGET: two builds clash when they write the same student's
-    // manifest and doc, so Brian building must not grey out Ray's button — and a
-    // Yu Ern button sitting on the parent Chess page must still go dead while Yu
+    // block is per-TARGET: two builds clash when they write the same student's
+    // manifest and doc, so Brian building must not stop Ray's button — and a
+    // Yu Ern button sitting on the parent Chess page must still go while Yu
     // Ern is building, which keying on the page alone would miss.
-    const inflight = jobs.filter(j => j.state === 'queued' || j.state === 'running');
-    const busy = t => t && t.skill && inflight.some(j => j.skill === t.skill &&
-      j.project === ((t.args || {}).student ? key.split('.')[0] + '.' + t.args.student : key));
-    const BUSY = ' <span class="muted" style="font-weight:400">— already running</span>';
+    // `awaiting_check` counts as in flight: that build's doc is half written.
+    const LIVE = ['queued', 'running', 'awaiting_check'];
+    const inflight = jobs.filter(j => LIVE.includes(j.state));
+    const at = t => (t && t.skill && inflight.find(j => j.skill === t.skill &&
+      j.project === ((t.args || {}).student ? key.split('.')[0] + '.' + t.args.student : key)) || {}).state || '';
+    const CHIPWRAP = s => `<span style="flex-shrink:0;padding:7px 2px">${jobChip(s)}</span>`;
     if (gated.length || (st.needs_you || []).length)
       parts.push(`<div class="sect">Needs you</div>${gateCards(gated)}${needsCards(st.needs_you || [])}`);
     if ((st.one_tap || []).length)
-      parts.push(`<div class="sect">One tap${
-        st.one_tap.some(busy) ? BUSY : ''
-        }</div><div class="actrow">${st.one_tap.map((t, i) =>
+      parts.push(`<div class="sect">One tap</div><div class="actrow">${st.one_tap.map((t, i) =>
         t.href ? `<a class="ghost" style="flex:1 1 46%;text-align:center" href="${esc(t.href)}">${esc(t.label)}</a>`
-               : `<button class="${t.style === 'ghost' ? 'ghost' : 'primary'}" data-tap="${i}"${
-                   busy(t) ? ' disabled' : ''}>${esc(t.label)}</button>`
+               : at(t) ? `<span class="muted" style="flex:1 1 46%;text-align:center;padding:9px 0">${
+                   esc(t.label)} ${jobChip(at(t))}</span>`
+               : `<button class="${t.style === 'ghost' ? 'ghost' : 'primary'}" data-tap="${i}">${esc(t.label)}</button>`
       ).join('')}</div>`);
     if (st.lessons && (st.lessons.items || []).length) {
-      const L = st.lessons, done = L.items.filter(i => i.taught).length;
+      const L = st.lessons, done = L.base + L.items.filter(i => i.taught).length;
       // what the Build buttons queue, for THIS page's student
-      const building = busy({ skill: 'build-chess-lesson',
-                              args: { student: key.replace(/^chess\./, '') } });
-      parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught${
-        building ? BUSY : ''}</div>
+      const building = at({ skill: 'build-chess-lesson',
+                            args: { student: key.replace(/^chess\./, '') } });
+      parts.push(`<div class="sect">Lessons — ${done} of ${L.base + L.items.length} taught</div>
         <div class="rowlist">${L.items.map((it, i) => {
           // tick = taught; Build = queue that lesson's build (any lesson, any order)
           const row = `<button class="lrow${it.taught ? ' done' : ''}" data-les="${i}"
              style="flex:1;min-width:0">
              <span class="lbox">${ICONS.check || '✓'}</span>
              <span class="ltx two">${esc(it.title)}</span></button>`;
-          return it.taught ? `<div>${row}</div>` : `<div>${row}
-            <button class="ghost" data-build="${i}"${building ? ' disabled' : ''}
-              style="padding:7px 12px;font-size:13.5px;flex-shrink:0">Build</button></div>`;
+          if (it.taught) return `<div>${row}</div>`;
+          // the chip goes on the lesson actually building (jobs are labelled
+          // "Build L<n>" everywhere they are created); the rest just cannot start
+          // until it finishes, because they write the same manifest and doc
+          const own = inflight.find(j => j.label === 'Build L' + it.n);
+          return `<div>${row}${own ? CHIPWRAP(own.state)
+            : `<button class="ghost" data-build="${i}"${building ? ' disabled' : ''}
+                 style="padding:7px 12px;font-size:13.5px;flex-shrink:0">Build</button>`}</div>`;
         }).join('')}</div>`);
     }
     // each row opens that build's chat: the gate it asked, what you said, the result
@@ -981,8 +1009,9 @@ async function projView(key) {
           // student, so they need the same per-target block the one-taps get
           return r.action
             ? `<div><a href="${esc(r.href)}"${ext} style="flex:1;display:flex;padding:0;border:none;min-width:0">${label}</a>
-               <button class="ghost" data-row="${i}"${busy(r.action) ? ' disabled' : ''}
-                 style="padding:7px 12px;font-size:13.5px;flex-shrink:0">${esc(r.action.label)}</button></div>`
+               ${at(r.action) ? CHIPWRAP(at(r.action))
+                 : `<button class="ghost" data-row="${i}"
+                      style="padding:7px 12px;font-size:13.5px;flex-shrink:0">${esc(r.action.label)}</button>`}</div>`
             : `<a href="${esc(r.href)}"${ext}>${label}<span class="chev">${ICONS.chev}</span></a>`;
         }).join('')}</div>`);
     $('main').innerHTML = parts.join('') || '<div class="empty">Nothing here yet.</div>';
@@ -997,6 +1026,28 @@ async function projView(key) {
       fire({ skill: 'build-chess-lesson', label: 'Build L' + it.n,
              args: { student: key.replace(/^chess\./, ''), lesson: it.n } }, b);
     }; });
+  }
+  /* A row that drills into a sub-page (chess.nathanael) takes its button and its
+     one-line status from THAT page's own state file. Anything written here by hand
+     goes stale the moment he ticks a lesson on the child page, which is exactly what
+     happened: Nathanael's row still said "L13 built" and offered no button at all
+     after L13 was ticked. Derived, so it can never drift again. */
+  async function drillDownRows() {
+    if (DEMO) return;
+    await Promise.all((st.rest || []).map(async r => {
+      const child = (r.href || '').startsWith('#/proj/') ? r.href.slice(7) : '';
+      if (!child.startsWith(key + '.')) return;
+      try {
+        const cs = JSON.parse((await loadFile(STATE_PATH(child))).text);
+        const act = (cs.one_tap || []).find(t => t.skill);
+        if (act) r.action = act;
+        const L = cs.lessons;
+        if (!L) return;
+        const taught = L.base + L.items.filter(i => i.taught).length;
+        const next = (L.items.find(i => !i.taught) || {}).n;
+        r.sub = `${taught} taught` + (next == null ? ', package finished' : `, next is L${next}`);
+      } catch (e) { /* no child page or a bad read: keep what the agent wrote */ }
+    }));
   }
   /* Recompute the one-tap button from taught progress: a fully-taught package
      means the next move is planning the next 10; otherwise build the next lesson.
