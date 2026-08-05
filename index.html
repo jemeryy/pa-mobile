@@ -44,6 +44,12 @@
   }
   header .title { font-weight: 650; flex: 1; font-size: 16px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+  /* the box's pulse: green = it spoke in the last 12 min, amber = it has gone
+     quiet (so anything reading "running" may be a corpse), grey = not known yet */
+  #boxdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--muted); margin-right: 4px; }
+  #boxdot.live { background: var(--ok); }
+  #boxdot.stale { background: var(--warn); }
   .iconbtn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 38px; height: 38px; border: none; background: none; color: var(--ink);
@@ -164,8 +170,9 @@
   #doc ul.cklist { list-style: none; padding-left: 2px; }
   #doc input[type=checkbox] { width: 19px; height: 19px; margin: 0 8px 0 0;
     vertical-align: -4px; accent-color: var(--accent); }
-  #doc li.done { color: var(--muted); text-decoration: line-through;
-    text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent); }
+  /* done reads as dimmed, never struck through: a ticked review item still has to be
+     readable, and strikethrough says "cancelled" when a tick here means "yes, do it". */
+  #doc li.done { color: var(--muted); }
   #doc .additem { display: flex; align-items: center; gap: 8px; color: var(--muted);
     background: none; border: none; padding: 6px 8px; font-size: 14px; margin-left: -6px;
     opacity: .75; }
@@ -388,6 +395,7 @@
 <header>
   <button class="iconbtn" id="hback" style="display:none" aria-label="Back"></button>
   <div class="title" id="htitle">PA Mobile</div>
+  <span id="boxdot" title="Checking the agent box…"></span>
   <span id="hactions" style="display:flex"></span>
 </header>
 <main id="main"></main>
@@ -733,6 +741,24 @@ async function clearHomeGate(id) {
     await saveFile(HOME_PATH, JSON.stringify(h, null, 2) + '\n', f.sha, 'phone: gate answered in chat');
   } catch (e) { /* the agent republishes home.json on its next pass */ }
 }
+/* The box's pulse. It stamps mailbox/beat.txt every few minutes (agent_loop.beat);
+   a dead box and a quiet one look identical from here otherwise, and a dead one
+   leaves every build reading "running" forever. */
+const BEAT_PATH = 'mailbox/beat.txt';
+const BEAT_STALE = 12 * 60 * 1000;              // 2.4x the box's 5-minute beat
+async function checkBox() {
+  const dot = $('boxdot');
+  if (!dot || DEMO || !token) return;
+  let age = null;
+  try {
+    age = Date.now() - Date.parse(b64decode((await ghGet(BEAT_PATH)).content).trim());
+  } catch (e) { /* no beat file, no network, no answer: unknown */ }
+  if (!(age >= 0)) age = null;                  // also catches an unparseable stamp
+  dot.className = age == null ? '' : age < BEAT_STALE ? 'live' : 'stale';
+  dot.title = age == null ? 'Cannot reach the agent box'
+    : age < BEAT_STALE ? 'Agent box is live'
+    : `Agent box has said nothing for ${Math.round(age / 60000)} min: anything showing as running may already be dead`;
+}
 async function loadHome() {
   if (DEMO) return DEMO_HOME;
   const f = await loadFile(HOME_PATH).catch(() => null);
@@ -751,6 +777,14 @@ function attentionCards(items) {
    skill); every card also gets Clear, so nothing is ever stuck. Wired in projView. */
 function needsCards(items) {
   return items.map((a, i) => {
+    // `review`: the decision lives on its own page (same shape as a job gate), so the
+    // card carries ONE button and no Clear. Deciding there is what clears the card.
+    if (a.review) return `<div class="card flag ${a.tone === 'green' ? 'green' : a.tone === 'dim' ? 'dim' : ''}">
+      <div class="ttl">${esc(a.title)}</div>
+      ${a.detail ? `<div class="det">${esc(a.detail)}</div>` : ''}
+      <div class="actrow" style="margin:10px 0 0"><a class="primary" style="flex:1;text-align:center"
+        href="${esc(a.review)}">Review</a></div>
+    </div>`;
     const acts = (a.actions || []).map((x, j) =>
       `<button class="${x.style === 'ghost' ? 'ghost' : 'primary'}" data-need="${i}" data-act="${j}"
          style="flex:1 1 46%">${esc(x.label)}</button>`).join('');
@@ -1646,6 +1680,46 @@ function docView(path) {
   setHeader(path.split('/').pop().replace(/\.md$/, ''), { back: true, actions });
   $('main').innerHTML = '<div id="doc"></div>';
   renderDoc();
+  if (REVIEW_RE.test(path)) reviewActions(path);
+}
+const REVIEW_RE = /^improvements\/review-[\d-]+\.md$/;
+/* The weekly review is decided on its own page, mirroring a job gate: the card
+   on System only links here, the buttons live under the proposals themselves so
+   he ticks and decides in one place. */
+function reviewActions(path) {
+  const bar = document.createElement('div');
+  bar.className = 'actrow'; bar.style.margin = '24px 0 6px';
+  bar.innerHTML = `<button class="primary" id="rvapply" style="flex:1 1 46%">Apply ticked</button>
+    <button class="ghost" id="rvask" style="flex:1 1 46%">Ask for changes</button>`;
+  $('main').appendChild(bar);
+  // Changes are a conversation, so they go to the agent's chat, not a text box.
+  $('rvask').onclick = () => { openAgent(); chatPrefill('Changes to ' + path + ': '); };
+  $('rvapply').onclick = async ev => {
+    ev.target.disabled = true;
+    try {
+      await runSkill({ project: 'system', skill: 'improve-system', label: 'Apply the weekly review',
+                       args: { mode: 'apply', file: path } });
+      await clearReviewCard(path);
+      toast('Applying the ticked items.');
+      location.hash = '#/proj/system';
+    } catch (e) { toast(e.message); ev.target.disabled = false; }
+  };
+}
+/* Applying IS the answer, so the card goes now rather than waiting for the agent. */
+async function clearReviewCard(path) {
+  if (DEMO) return;
+  try {
+    const f = await loadFile(STATE_PATH('system'));
+    const s = JSON.parse(f.text);
+    const gone = (s.needs_you || []).filter(n => (n.review || '').includes(path));
+    if (!gone.length) return;
+    s.needs_you = s.needs_you.filter(n => !gone.includes(n));
+    await saveFile(STATE_PATH('system'), JSON.stringify(s, null, 2) + '\n', f.sha, 'phone: review applied');
+    const h = await loadFile(HOME_PATH);
+    const home = JSON.parse(h.text);
+    home.attention = (home.attention || []).filter(a => !gone.some(n => n.title === a.title));
+    await saveFile(HOME_PATH, JSON.stringify(home, null, 2) + '\n', h.sha, 'phone: review applied');
+  } catch (e) { /* best effort: the agent republishes both on its next pass */ }
 }
 function renderDoc() {
   const doc = $('doc');
@@ -2616,6 +2690,8 @@ if (DEMO) {
 }
 
 route();
+checkBox();
+setInterval(checkBox, 120000);
 </script>
 </body>
 </html>
