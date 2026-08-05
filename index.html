@@ -44,12 +44,6 @@
   }
   header .title { font-weight: 650; flex: 1; font-size: 16px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
-  /* the box's pulse: green = it spoke in the last 12 min, amber = it has gone
-     quiet (so anything reading "running" may be a corpse), grey = not known yet */
-  #boxdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-    background: var(--muted); margin-right: 4px; }
-  #boxdot.live { background: var(--ok); }
-  #boxdot.stale { background: var(--warn); }
   .iconbtn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 38px; height: 38px; border: none; background: none; color: var(--ink);
@@ -395,7 +389,6 @@
 <header>
   <button class="iconbtn" id="hback" style="display:none" aria-label="Back"></button>
   <div class="title" id="htitle">PA Mobile</div>
-  <span id="boxdot" title="Checking the agent box…"></span>
   <span id="hactions" style="display:flex"></span>
 </header>
 <main id="main"></main>
@@ -677,6 +670,10 @@ const DEMO_HOME = {
   busy: false,
 };
 function jobChip(state) {
+  // only the box moves a job on, so if it has gone silent (see BEAT_PATH) a job
+  // still claiming to be in flight died with it and nobody was left to say so
+  if (boxQuiet && (state === 'queued' || state === 'running'))
+    return `<span class="chip failed" title="The agent box stopped responding while this was going">stopped</span>`;
   return `<span class="chip ${JOB_CLASS[state] || ''}">${JOB_WORDS[state] || esc(state)}</span>`;
 }
 /* Fire a skill: the phone writes the job file, the agent picks it up. */
@@ -741,23 +738,25 @@ async function clearHomeGate(id) {
     await saveFile(HOME_PATH, JSON.stringify(h, null, 2) + '\n', f.sha, 'phone: gate answered in chat');
   } catch (e) { /* the agent republishes home.json on its next pass */ }
 }
-/* The box's pulse. It stamps mailbox/beat.txt every few minutes (agent_loop.beat);
-   a dead box and a quiet one look identical from here otherwise, and a dead one
-   leaves every build reading "running" forever. */
+/* The box stamps mailbox/beat.txt every few minutes (agent_loop.beat). This is
+   NOT a status light: a box that is merely idle is nobody's business. It exists
+   for the one case nothing else catches — the box dying mid-build. Job state is
+   written BY the box, so when it stops, everything it was running keeps reading
+   "running" forever with nothing left alive to mark it failed (both chess builds
+   did exactly that on 2026-08-05). Silence past BEAT_STALE means those jobs are
+   dead, so the chip says so. */
 const BEAT_PATH = 'mailbox/beat.txt';
 const BEAT_STALE = 12 * 60 * 1000;              // 2.4x the box's 5-minute beat
+let boxQuiet = false;
 async function checkBox() {
-  const dot = $('boxdot');
-  if (!dot || DEMO || !token) return;
+  if (DEMO || !token) return boxQuiet;
   let age = null;
   try {
     age = Date.now() - Date.parse(b64decode((await ghGet(BEAT_PATH)).content).trim());
-  } catch (e) { /* no beat file, no network, no answer: unknown */ }
-  if (!(age >= 0)) age = null;                  // also catches an unparseable stamp
-  dot.className = age == null ? '' : age < BEAT_STALE ? 'live' : 'stale';
-  dot.title = age == null ? 'Cannot reach the agent box'
-    : age < BEAT_STALE ? 'Agent box is live'
-    : `Agent box has said nothing for ${Math.round(age / 60000)} min: anything showing as running may already be dead`;
+  } catch (e) { /* no beat file, no network, no answer */ }
+  // unknown is NOT quiet: a network blip must never accuse a healthy build
+  boxQuiet = age >= BEAT_STALE;
+  return boxQuiet;
 }
 async function loadHome() {
   if (DEMO) return DEMO_HOME;
@@ -875,7 +874,7 @@ async function gateView(id) {
 async function renderDashboard() {
   const el = $('dash'); if (!el) return;
   let home;
-  try { home = await loadHome(); }
+  try { [home] = await Promise.all([loadHome(), checkBox()]); }
   catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
   if (!$('dash')) return;                              // navigated away while loading
   const att = home.attention || [];
@@ -888,7 +887,11 @@ async function renderDashboard() {
          <span class="em">${p.icon || '&#128194;'}</span>${esc(p.title)}
          ${p.badge ? `<span class="badge">${p.badge}</span>` : ''}</a>`).join('')}
      </div>` +
-    (home.busy ? '<p class="muted" style="margin:10px 4px 0">The agent is working on something.</p>' : '');
+    // "busy" is the box's own word for it, so a box that has gone silent while
+    // busy is the one thing worth shouting about: that work is already dead
+    (!home.busy ? ''
+      : boxQuiet ? '<p class="err" style="margin:10px 4px 0">The agent box stopped responding. Whatever it was running has died.</p>'
+                 : '<p class="muted" style="margin:10px 4px 0">The agent is working on something.</p>');
 }
 const DEMO_STATE = {
   chess: { project: 'chess', title: 'Chess', icon: '&#9822;',
@@ -954,12 +957,13 @@ async function projView(key) {
   const mine = h => (h.jobs || []).filter(j => (j.project === key ||
     (j.project || '').startsWith(key + '.')) && j.state !== 'done');
   const jobs = mine(home);
-  await drillDownRows();
+  await Promise.all([drillDownRows(), checkBox()]);
   render();
   // Job state changes on the box, not here. Without this the page he left open
   // still reads "in line" long after that build actually started.
   if (!DEMO) {
-    const stamp = j => j.id + j.state, myHash = location.hash;
+    const sig = () => boxQuiet + '|' + jobs.map(j => j.id + j.state).join();
+    let seen = sig(), myHash = location.hash;
     const poll = setInterval(async () => {
       // a route that happened while this view was still loading owns viewCleanup
       // now, so this timer has to be able to stop itself
@@ -967,8 +971,10 @@ async function projView(key) {
       const f = await loadFile(HOME_PATH).catch(() => null);
       if (!f) return;                               // blip: keep what is on screen
       const fresh = mine(JSON.parse(f.text));
-      if (fresh.map(stamp).join() === jobs.map(stamp).join()) return;
       jobs.length = 0; jobs.push(...fresh);
+      await checkBox();                             // a silent box unmasks dead jobs
+      if (sig() === seen) return;
+      seen = sig();
       render();
     }, 15000);
     viewCleanup = () => clearInterval(poll);
@@ -2690,8 +2696,6 @@ if (DEMO) {
 }
 
 route();
-checkBox();
-setInterval(checkBox, 120000);
 </script>
 </body>
 </html>
