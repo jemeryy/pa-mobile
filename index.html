@@ -1599,9 +1599,10 @@ function agMic(retry) {
     agRec = null;
     if (e.error === 'aborted' && !retry) return void setTimeout(() => agMic(true), 300);
     if (e.error === 'not-allowed') return toast('Microphone is blocked in Settings');
-    // diagnostics: standalone (Home Screen) iOS is the usual cause of an instant abort
-    toast('Mic: ' + e.error + ' | started=' + started + ' | ' + (Date.now() - t0) + 'ms | pwa='
-      + !!navigator.standalone + ' | ' + (e.message || 'no msg'));
+    // diagnostics into the text box (the toast is one clipped line)
+    ta.value = 'MIC ' + e.error + ' | started=' + started + ' | ' + (Date.now() - t0) + 'ms | pwa='
+      + !!navigator.standalone + ' | ios=' + IOS + ' | ' + (e.message || 'no msg');
+    ta.oninput();
   };
   agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
   agRec.start();
