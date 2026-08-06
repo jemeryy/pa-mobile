@@ -1037,7 +1037,10 @@ async function projView(key) {
     // each row opens that build's chat: the gate it asked, what you said, the result
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map((j, i) =>
-        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(j.label || j.skill)}</span>${jobChip(j.state)}</div>`).join('')}</div>`);
+        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(j.label || j.skill)}</span>${
+          LIVE.includes(j.state) && j.state !== 'awaiting_check' && !boxQuiet
+            ? `<button class="ghost" data-jstop="${i}" style="padding:5px 10px;font-size:13px;margin-right:8px">Stop</button>`
+            : ''}${jobChip(j.state)}</div>`).join('')}</div>`);
     if ((st.rest || []).length)
       parts.push(`<div class="sect">${esc(st.rest_title || 'The rest')}</div>
         <div class="rowlist">${st.rest.map((r, i) => {
@@ -1060,6 +1063,23 @@ async function projView(key) {
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
     $('main').querySelectorAll('[data-jchat]').forEach(b => { b.onclick = () => {
       const j = jobs[+b.dataset.jchat]; if (j) openAgent(j.id); }; });
+    // Stop: the phone only writes files, so it sets `stop` on the job and the box
+    // kills the run on its next pass (agent_loop.apply_stops). Stopping leaves the
+    // job dead on purpose — the next thing said in its chat starts it again with
+    // whatever you changed, which is what stopping is for.
+    $('main').querySelectorAll('[data-jstop]').forEach(b => { b.onclick = async ev => {
+      ev.stopPropagation();                        // the row itself opens the chat
+      const j = jobs[+b.dataset.jstop]; if (!j) return;
+      b.disabled = true;
+      try {
+        const f = await loadFile(JOB_PATH(j.id));
+        const job = JSON.parse(f.text);
+        if (!LIVE.includes(job.state)) throw new Error('That already finished.');
+        await saveFile(JOB_PATH(j.id), JSON.stringify(
+          { ...job, stop: true, updated: nowIso() }, null, 2) + '\n', f.sha, 'phone: stop');
+        toast('Stopping. Say what to change in its chat and it starts again from there.');
+      } catch (e) { toast(e.message); b.disabled = false; }
+    }; });
     $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
     $('main').querySelectorAll('[data-build]').forEach(b => { b.onclick = () => {
       const it = st.lessons.items[+b.dataset.build];
