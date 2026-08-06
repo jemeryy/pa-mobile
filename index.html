@@ -1581,7 +1581,9 @@ function agMic() {
   const ta = $('chatin');
   if (agRec) { agRec.stop(); return; }                 // tap again to stop
   agRec = new SpeechRec();
-  agRec.lang = 'en-SG'; agRec.interimResults = true; agRec.continuous = true;
+  agRec.lang = 'en-SG'; agRec.interimResults = true;
+  // iOS Safari aborts a continuous session immediately; keep it single-shot there
+  agRec.continuous = !window.webkitSpeechRecognition || !!window.SpeechRecognition;
   const before = ta.value ? ta.value + ' ' : '';
   agRec.onresult = e => {
     let heard = '';
