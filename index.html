@@ -99,6 +99,13 @@
     margin: 22px 4px 8px; }
   .muted { color: var(--muted); font-size: 14px; }
   .err { color: var(--danger); font-size: 14px; }
+  /* what the build is doing right now: a running log, not conversation */
+  .live { border-left: 2px solid var(--line); margin: 10px 2px 4px; padding: 2px 0 2px 10px; }
+  .lv { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 3px 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lv.tool { color: var(--accent); }
+  .lv.think { font-style: italic; }
+  .lv.done { color: var(--ok); }
   .empty { text-align: center; color: var(--muted); padding: 36px 20px; font-size: 14.5px; }
   .primary {
     background: var(--accent); color: var(--accent-ink); border: none;
@@ -1233,6 +1240,40 @@ async function projView(key) {
   }
 }
 
+/* =============== live activity from the box ===============
+   The mailbox goes through git, so nothing can appear faster than a commit and a
+   push. That is fine for job state and useless for watching a build think, so the
+   box also serves what Claude is doing right now on its own domain
+   (tools/activity.py). Read-only and token-gated; without a token this is simply
+   off and the chat behaves exactly as it did. */
+const BOX = 'https://personal-assistant-production-122c.up.railway.app';
+let boxTok = localStorage.getItem('pa_boxtok') || '';
+function saveBoxTok() {
+  boxTok = ($('boxtok').value || '').trim();
+  localStorage.setItem('pa_boxtok', boxTok);
+  $('bstat').textContent = boxTok ? 'On' : 'Off';
+  $('bstat').className = 'stat' + (boxTok ? ' ok' : '');
+  toast(boxTok ? 'Live activity on.' : 'Live activity off.');
+}
+const LIVE_KEEP = 40;                       // a phone screen, not a whole transcript
+async function agActivity() {
+  // a job's thread IS its job id; an ordinary chat has nothing to watch
+  if (DEMO || !boxTok || !agT || !agT.startsWith('j-')) return;
+  const t = agT;
+  try {
+    // token in the query, not a header: a custom header makes every poll a CORS
+    // preflight, and the box does not log requests, so there is nowhere for it to leak
+    const r = await fetch(`${BOX}/activity?job=${encodeURIComponent(t)}&since=${agLiveNext
+      }&token=${encodeURIComponent(boxTok)}`);
+    if (!r.ok || agT !== t) return;
+    const d = await r.json();
+    if (!(d.lines || []).length) return;
+    agLive = agLive.concat(d.lines).slice(-LIVE_KEEP);
+    agLiveNext = d.next;
+    agRender();
+  } catch (e) { /* box redeploying or offline: the chat itself still works */ }
+}
+
 /* =============== chat with the agent ===============
    The mailbox contract lives in tools/agent_loop.py: one JSON object per line,
    appended by both sides. The phone only ever appends; the agent's replies
@@ -1327,6 +1368,7 @@ function optSelect(id, pairs, cur) {
    It outlives routing on purpose (that is what lets a message say "this page"),
    so it owns its own poll timer instead of the router's viewCleanup. */
 let agT = '', agMsgs = [], agSha, agText0 = '', agSending = false, agTimer = null, agRec = null;
+let agLive = [], agLiveNext = 0;      // what the box says this build is doing right now
 
 function agentOpen() { return document.body.classList.contains('agent-open'); }
 /* Which page he is looking at, as something the box can open: a repo path where
@@ -1412,6 +1454,7 @@ function closeAgent() {
 async function openThread(t) {
   agT = t; sessionStorage.setItem('pa_thread', t);
   agMsgs = []; agSha = undefined; agText0 = '';
+  agLive = []; agLiveNext = 0;
   clearInterval(agTimer); agTimer = null;
   $('atitle').textContent = 'Agent';
   $('abody').innerHTML = `
@@ -1429,6 +1472,7 @@ async function openThread(t) {
   if (f) { agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text); }
   agRender();
   agTimer = setInterval(agPoll, 5000);
+  agActivity();
 }
 function agRender() {
   const log = $('chatlog'); if (!log) return;
@@ -1439,6 +1483,8 @@ function agRender() {
       : `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
            m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
+    + (agLive.length ? `<div class="live">${agLive.map(l =>
+        `<div class="lv ${esc(l.kind || '')}">${esc(l.text || '')}</div>`).join('')}</div>` : '')
     + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
   showPage();
@@ -1446,6 +1492,7 @@ function agRender() {
 }
 async function agPoll() {
   if (!agentOpen() || agSending) return;
+  agActivity();                       // what it is doing now, straight from the box
   const t = agT;
   try {
     const j = await ghGet(chatPath(t));
@@ -2644,6 +2691,17 @@ function settingsView() {
       <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
         <button class="primary" onclick="saveCidAndConnect()">Save and connect</button>
         ${gtok ? '<button class="ghost danger" onclick="gDisconnect()">Disconnect</button>' : ''}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Live build activity</h3>
+      <p>Watch a build as it works instead of waiting for it to finish. Reads straight from the
+      agent box, so it needs the box's own token (<code>PA_STREAM_TOKEN</code>). Read only:
+      nothing on this connection can change anything.</p>
+      <input type="text" id="boxtok" placeholder="PA_STREAM_TOKEN" value="${esc(boxTok)}">
+      <div class="stat ${boxTok ? 'ok' : ''}" id="bstat">${boxTok ? 'On' : 'Off'}</div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="primary" onclick="saveBoxTok()">Save</button>
       </div>
     </div>
     <p class="muted" style="text-align:center">PA Mobile v2</p>
