@@ -1593,10 +1593,15 @@ function agMic(retry) {
     for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
     ta.value = before + heard; ta.oninput();
   };
+  const t0 = Date.now(); let started = false;
+  agRec.onstart = () => { started = true; };
   agRec.onerror = e => {
     agRec = null;
     if (e.error === 'aborted' && !retry) return void setTimeout(() => agMic(true), 300);
-    toast(e.error === 'not-allowed' ? 'Microphone is blocked in Settings' : 'Mic: ' + e.error);
+    if (e.error === 'not-allowed') return toast('Microphone is blocked in Settings');
+    // diagnostics: standalone (Home Screen) iOS is the usual cause of an instant abort
+    toast('Mic: ' + e.error + ' | started=' + started + ' | ' + (Date.now() - t0) + 'ms | pwa='
+      + !!navigator.standalone + ' | ' + (e.message || 'no msg'));
   };
   agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
   agRec.start();
