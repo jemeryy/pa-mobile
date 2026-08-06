@@ -1599,9 +1599,10 @@ function agMic(retry) {
     agRec = null;
     if (e.error === 'aborted' && !retry) return void setTimeout(() => agMic(true), 300);
     if (e.error === 'not-allowed') return toast('Microphone is blocked in Settings');
-    // diagnostics into the text box (the toast is one clipped line)
-    ta.value = 'MIC ' + e.error + ' | started=' + started + ' | ' + (Date.now() - t0) + 'ms | pwa='
-      + !!navigator.standalone + ' | ios=' + IOS + ' | ' + (e.message || 'no msg');
+    // the message is the useful part (e.g. "Siri and Dictation are disabled"), and the
+    // toast is one clipped line, so put it where it can be read in full
+    ta.value = (e.message || 'Mic failed: ' + e.error)
+      + (/dictation/i.test(e.message || '') ? ' - turn on Settings > General > Keyboard > Enable Dictation' : '');
     ta.oninput();
   };
   agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
