@@ -1432,7 +1432,7 @@ function agentShell() {
       e.preventDefault(); agSend();
     }
   });
-  if (SpeechRec && $('chatmic')) $('chatmic').onclick = agMic;
+  if (SpeechRec && $('chatmic')) $('chatmic').onclick = () => agMic();
   return el;
 }
 /* thread: a thread id, 'new' for a fresh one, or nothing to reopen the last. */
@@ -1577,20 +1577,27 @@ async function showChats() {
     };
   });
 }
-function agMic() {
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function agMic(retry) {
   const ta = $('chatin');
   if (agRec) { agRec.stop(); return; }                 // tap again to stop
+  // iOS gives speech recognition the audio session only if TTS has let go of it
+  if (window.speechSynthesis) speechSynthesis.cancel();
   agRec = new SpeechRec();
-  agRec.lang = 'en-SG'; agRec.interimResults = true;
-  // iOS Safari aborts a continuous session immediately; keep it single-shot there
-  agRec.continuous = !window.webkitSpeechRecognition || !!window.SpeechRecognition;
+  // iOS Safari aborts on continuous, on interim results, and on an unsupported lang
+  if (!IOS) { agRec.lang = 'en-SG'; agRec.interimResults = true; agRec.continuous = true; }
   const before = ta.value ? ta.value + ' ' : '';
   agRec.onresult = e => {
     let heard = '';
     for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
     ta.value = before + heard; ta.oninput();
   };
-  agRec.onerror = e => { toast(e.error === 'not-allowed' ? 'Microphone is blocked in Settings' : 'Mic: ' + e.error); };
+  agRec.onerror = e => {
+    agRec = null;
+    if (e.error === 'aborted' && !retry) return void setTimeout(() => agMic(true), 300);
+    toast(e.error === 'not-allowed' ? 'Microphone is blocked in Settings' : 'Mic: ' + e.error);
+  };
   agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
   agRec.start();
   $('chatmic').classList.add('danger');
