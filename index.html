@@ -1585,8 +1585,8 @@ function agMic(retry) {
   // iOS gives speech recognition the audio session only if TTS has let go of it
   if (window.speechSynthesis) speechSynthesis.cancel();
   agRec = new SpeechRec();
-  // iOS Safari aborts on continuous, on interim results, and on an unsupported lang
-  if (!IOS) { agRec.lang = 'en-SG'; agRec.interimResults = true; agRec.continuous = true; }
+  agRec.interimResults = true; agRec.continuous = true;
+  if (!IOS) agRec.lang = 'en-SG';   // on iOS the device's own dictation language is better
   const before = ta.value ? ta.value + ' ' : '';
   agRec.onresult = e => {
     let heard = '';
