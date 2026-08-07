@@ -1579,13 +1579,17 @@ async function showChats() {
 }
 const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let agMicOn = false;
 function agMic(retry) {
   const ta = $('chatin');
-  if (agRec) { agRec.stop(); return; }                 // tap again to stop
+  if (agRec) { agMicOn = false; agRec.stop(); return; }   // tap again to stop
+  agMicOn = true;
   // iOS gives speech recognition the audio session only if TTS has let go of it
   if (window.speechSynthesis) speechSynthesis.cancel();
   agRec = new SpeechRec();
-  agRec.interimResults = true; agRec.continuous = true;
+  agRec.interimResults = true;
+  // iOS reports no-speech and quits instantly on a continuous session; restart it in onend
+  agRec.continuous = !IOS;
   if (!IOS) agRec.lang = 'en-SG';   // on iOS the device's own dictation language is better
   const before = ta.value ? ta.value + ' ' : '';
   agRec.onresult = e => {
@@ -1597,7 +1601,9 @@ function agMic(retry) {
   agRec.onstart = () => { started = true; };
   agRec.onerror = e => {
     agRec = null;
-    if (e.error === 'aborted' && !retry) return void setTimeout(() => agMic(true), 300);
+    if (e.error === 'no-speech') return;                 // onend restarts the session
+    agMicOn = false;
+    if (e.error === 'aborted' && !retry) { agMicOn = true; return void setTimeout(() => agMic(true), 300); }
     if (e.error === 'not-allowed') return toast('Microphone is blocked in Settings');
     // the message is the useful part (e.g. "Siri and Dictation are disabled"), and the
     // toast is one clipped line, so put it where it can be read in full
@@ -1605,7 +1611,11 @@ function agMic(retry) {
       + (/dictation/i.test(e.message || '') ? ' - turn on Settings > General > Keyboard > Enable Dictation' : '');
     ta.oninput();
   };
-  agRec.onend = () => { agRec = null; const m = $('chatmic'); if (m) m.classList.remove('danger'); };
+  agRec.onend = () => {
+    agRec = null;
+    if (agMicOn) return void setTimeout(() => agMic(), 100);   // keep listening until tapped off
+    const m = $('chatmic'); if (m) m.classList.remove('danger');
+  };
   agRec.start();
   $('chatmic').classList.add('danger');
 }
