@@ -770,13 +770,44 @@ async function loadHome() {
   const f = await loadFile(HOME_PATH).catch(() => null);
   return f ? JSON.parse(f.text) : { attention: [], projects: [], jobs: [], busy: false };
 }
+/* Home's attention feed. Each card is still a link, plus a × that dismisses it for
+   good: a job card is dismissed on the job file, a project item is removed from the
+   state file it came from (`stateKey`). Both are rebuilt from those files every pass,
+   so clearing only home.json would put the card straight back. */
 function attentionCards(items) {
-  return items.map(a => `<a class="card flag ${a.tone === 'green' ? 'green' : a.tone === 'dim' ? 'dim' : ''}"
-      href="${esc(a.href || '#')}" style="display:block">
-      <div class="ttl">${esc(a.title)}</div>
-      ${a.detail ? `<div class="det">${esc(a.detail)}</div>` : ''}
-      ${a.projectTitle ? `<div class="det" style="margin-top:4px;font-size:12.5px">${esc(a.projectTitle)}</div>` : ''}
-    </a>`).join('');
+  return items.map((a, i) => `<div class="card flag ${a.tone === 'green' ? 'green' : a.tone === 'dim' ? 'dim' : ''}"
+      style="position:relative">
+      <a href="${esc(a.href || '#')}" style="display:block">
+        <div class="ttl" style="padding-right:26px">${esc(a.title)}</div>
+        ${a.detail ? `<div class="det">${esc(a.detail)}</div>` : ''}
+        ${a.projectTitle ? `<div class="det" style="margin-top:4px;font-size:12.5px">${esc(a.projectTitle)}</div>` : ''}
+      </a>
+      <button class="iconbtn" data-att="${i}" aria-label="Clear"
+        style="position:absolute;top:6px;right:6px;color:var(--muted);font-size:17px">&times;</button>
+    </div>`).join('');
+}
+/* Make the card gone and keep it gone. Everything is best effort past the first
+   write: home.json is regenerated anyway, so the source file is the one that counts. */
+async function clearAttention(a) {
+  if (DEMO) return;
+  if (a.job) {
+    const f = await loadFile(JOB_PATH(a.job));
+    const job = JSON.parse(f.text); job.dismissed = true;
+    await saveFile(JOB_PATH(a.job), JSON.stringify(job, null, 2) + '\n', f.sha, 'phone: clear ' + a.job);
+  } else if (a.stateKey) {
+    const f = await loadFile(STATE_PATH(a.stateKey));
+    const st = JSON.parse(f.text);
+    st.needs_you = (st.needs_you || []).filter(n =>
+      n.title !== a.title || (n.detail || '') !== (a.detail || ''));
+    await saveFile(STATE_PATH(a.stateKey), JSON.stringify(st, null, 2) + '\n', f.sha, 'phone: clear attention');
+  }
+  try {
+    const f = await loadFile(HOME_PATH);
+    const home = JSON.parse(f.text);
+    home.attention = (home.attention || []).filter(x =>
+      x.title !== a.title || (x.detail || '') !== (a.detail || ''));   // match the source filter, or a same-title sibling vanishes
+    await saveFile(HOME_PATH, JSON.stringify(home, null, 2) + '\n', f.sha, 'phone: clear attention');
+  } catch (e) { /* the source file is already cleared; home rebuilds from it */ }
 }
 /* Project-page version: a needs_you card you can actually resolve. An item's
    optional `actions` become buttons (send a note to the agent, maybe run a
@@ -886,7 +917,10 @@ async function renderDashboard() {
   if (!$('dash')) return;                              // navigated away while loading
   const att = home.attention || [];
   el.innerHTML =
-    (att.length ? `<div class="sect">Needs your attention</div>${attentionCards(att)}` : '') +
+    (att.length ? `<div class="sect" style="display:flex;align-items:baseline;justify-content:space-between">
+        <span>Needs your attention</span>
+        <button id="attclear" class="muted" style="background:none;border:0;padding:0;font-size:13px">Clear all</button>
+      </div>${attentionCards(att)}` : '') +
     `<div class="sect">Do things</div>
      <div class="btngrid">
        <button class="bigbtn wide" onclick="openAgent('new')"><span class="em">&#128172;</span>Talk to Agent</button>
@@ -899,6 +933,20 @@ async function renderDashboard() {
     (!home.busy ? ''
       : boxQuiet ? '<p class="err" style="margin:10px 4px 0">The agent box stopped responding. Whatever it was running has died.</p>'
                  : '<p class="muted" style="margin:10px 4px 0">The agent is working on something.</p>');
+  el.querySelectorAll('[data-att]').forEach(b => {
+    b.onclick = async e => {
+      e.preventDefault(); b.disabled = true;
+      try { await clearAttention(att[+b.dataset.att]); b.closest('.card').remove(); }
+      catch (err) { toast(err.message); b.disabled = false; }
+    };
+  });
+  if ($('attclear')) $('attclear').onclick = async () => {
+    if (!confirm(`Clear all ${att.length}?`)) return;
+    // one at a time: they write the same home.json, and a parallel run would have
+    // every one of them racing on the same stale sha
+    for (const a of att) { try { await clearAttention(a); } catch (e) { /* keep going */ } }
+    renderDashboard();
+  };
 }
 const DEMO_STATE = {
   chess: { project: 'chess', title: 'Chess', icon: '&#9822;',
@@ -1257,8 +1305,9 @@ function saveBoxTok() {
 }
 const LIVE_KEEP = 40;                       // a phone screen, not a whole transcript
 async function agActivity() {
-  // a job's thread IS its job id; an ordinary chat has nothing to watch
-  if (DEMO || !boxTok || !agT || !agT.startsWith('j-')) return;
+  // Every thread streams now, chats included (agent_loop passes the thread as the
+  // stream key). A thread the box has not run yet simply has no lines yet.
+  if (DEMO || !boxTok || !agT) return;
   const t = agT;
   try {
     // token in the query, not a header: a custom header makes every poll a CORS
@@ -1404,6 +1453,9 @@ function agentShell() {
     </div>
     <div class="abody" id="abody"></div>
     <div class="afoot">
+      <input type="file" id="chatfile" multiple style="display:none"
+             accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx">
+      <button class="ghost" id="chatclip" aria-label="Attach a file">&#128206;</button>
       ${SpeechRec ? '<button class="ghost" id="chatmic" aria-label="Speak">&#127908;</button>' : ''}
       <textarea id="chatin" rows="1" enterkeyhint="send" placeholder="Ask about this page…"></textarea>
       <button class="primary" id="chatsend">Send</button>
@@ -1433,7 +1485,69 @@ function agentShell() {
     }
   });
   if (SpeechRec && $('chatmic')) $('chatmic').onclick = () => agMic();
+  $('chatclip').onclick = () => $('chatfile').click();
+  $('chatfile').onchange = e => agAttach([...e.target.files]).finally(() => { e.target.value = ''; });
   return el;
+}
+/* Attachments: the file is committed into the repo and the chat message names its
+   path, so the box (which has the whole checkout) just Reads it. No new transport,
+   no new endpoint — the mailbox is already the channel.
+   Photos are re-encoded to at most 1568px JPEG in the browser: that is the size
+   Claude actually looks at, and a 12MP phone original is ~15x the upload for no
+   extra detail. ponytail: everything else goes up as-is; add compression when a
+   real file is too big for the contents API, not before. */
+const SHOT_MAX = 1568;
+const UPLOAD_MAX = 20e6;
+function shrinkImage(file) {
+  return new Promise(resolve => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };   // HEIC etc: send raw
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const k = Math.min(1, SHOT_MAX / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => resolve(b), 'image/jpeg', 0.85);
+    };
+    img.src = url;
+  });
+}
+async function agAttach(files) {
+  if (!files.length) return;
+  if (DEMO) return toast('Demo mode: nothing is uploaded.');
+  const ta = $('chatin');
+  for (const f of files) {
+    toast('Uploading ' + f.name + '…');
+    let blob = f, name = f.name;
+    if (/^image\//.test(f.type)) {
+      const small = await shrinkImage(f);
+      if (small) { blob = small; name = name.replace(/\.[^.]*$/, '') + '.jpg'; }
+    }
+    // nothing shrinks a PDF or a spreadsheet, and the contents API turns flaky
+    // well before its own limit. Say so up front instead of after the upload.
+    if (blob.size > UPLOAD_MAX) {
+      toast(name + ' is too big (' + Math.round(blob.size / 1e6) + ' MB). Send a smaller one.');
+      return;
+    }
+    const path = 'mailbox/uploads/' + agT + '/' + Date.now().toString(36) + '-'
+               + name.replace(/[^A-Za-z0-9._-]/g, '_');
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 8192));
+    try {
+      // no sha: the path is unique per upload, so this is always a create
+      const r = await gh(path, { method: 'PUT', body: JSON.stringify({
+        message: 'phone: attach ' + name, content: btoa(bin), branch: 'main' }) });
+      if (r.status === 409) throw new Error('conflict');
+    } catch (e) { toast('Upload failed: ' + e.message); return; }
+    // the path goes in the message text on purpose: that IS the whole contract, so
+    // nothing in agent_loop or the renderer has to learn about attachments
+    ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n' : '')
+             + '[attached file, read it at ' + path + ']';
+  }
+  ta.oninput(); ta.focus();
+  toast('Attached. Say what to do with it, then Send.');
 }
 /* thread: a thread id, 'new' for a fresh one, or nothing to reopen the last. */
 function openAgent(thread) {
@@ -1498,9 +1612,13 @@ async function agPoll() {
     const j = await ghGet(chatPath(t));
     if (agT !== t || agSending || !j || !j.sha || j.sha === agSha) return;
     const before = agMsgs.length ? agMsgs[agMsgs.length - 1].id : null;
-    agSha = j.sha; agText0 = b64decode(j.content); agMsgs = chatParse(agText0); agRender();
+    agSha = j.sha; agText0 = b64decode(j.content); agMsgs = chatParse(agText0);
     const fresh = agMsgs.slice(agMsgs.findIndex(m => m.id === before) + 1);
     const reply = fresh.filter(m => m.role === 'assistant').pop();
+    // the running commentary was about producing THIS reply; once it is here,
+    // leaving it on screen reads as a second thing still happening
+    if (reply) { agLive = []; agLiveNext = 0; }
+    agRender();
     if (reply) speak(reply.text);
   } catch (e) { /* 404 (no thread yet) or transient: ignore */ }
 }
@@ -1543,39 +1661,85 @@ function chatPrefill(text) {
   };
   put();
 }
-/* Past chats, in the panel: tapping one loads it without leaving the page. */
+/* One chat file gone. Returns '' on success, or why it did not go. */
+async function deleteChat(thread, sha) {
+  try {
+    const r = await gh(chatPath(thread), { method: 'DELETE', body: JSON.stringify({
+      message: 'phone: delete chat ' + thread, sha, branch: 'main' }) });
+    return r.status === 409 ? 'changed while you were looking' : '';
+  } catch (err) { return err.message; }
+}
+/* Past chats, in the panel: tapping one loads it without leaving the page.
+   Select mode turns the rows into tickboxes so a pile of dead build threads goes
+   in one action instead of one confirm each. */
+let chatSel = null;                        // Set of picked threads, null = not selecting
 async function showChats() {
   const body = $('abody'); if (!body) return;
-  const head = '<div class="sect" style="margin:2px 4px 8px">Past chats</div>';
-  body.innerHTML = head + skels(3);
+  const heading = sel => `<div class="sect" style="margin:2px 4px 8px;display:flex;align-items:baseline;justify-content:space-between">
+      <span>Past chats</span>
+      <button id="chatsel" class="muted" style="background:none;border:0;padding:0;font-size:13px">${sel ? 'Cancel' : 'Select'}</button>
+    </div>`;
+  chatSel = null;                          // reopening the list always starts clean
+  body.innerHTML = heading(false) + skels(3);
   const metas = await chatMetas();
   if (!$('abody')) return;
-  body.innerHTML = head + (metas.length
-    ? '<div class="rowlist">' + metas.map(m =>
-      `<button data-th="${esc(m.thread)}" class="${m.thread === agT ? 'cur' : ''}">
-        <span class="ric">&#128172;</span>
-        <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
-        <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span>
-        <span data-del="${esc(m.thread)}" data-sha="${esc(m.sha || '')}" class="muted"
-              style="flex-shrink:0;margin-left:8px;padding:2px 8px;font-size:16px">&#128465;</span>
-      </button>`).join('') + '</div>'
-    : '<div class="empty">No chats yet.</div>');
-  body.querySelectorAll('[data-th]').forEach(b => { b.onclick = () => openThread(b.dataset.th); });
-  body.querySelectorAll('[data-del]').forEach(x => {
-    x.onclick = async e => {
-      e.stopPropagation();
-      const t = x.dataset.del;
-      if (!confirm('Delete this chat? It cannot be undone from the phone.')) return;
-      try {
-        const r = await gh(chatPath(t), { method: 'DELETE', body: JSON.stringify({
-          message: 'phone: delete chat ' + t, sha: x.dataset.sha, branch: 'main' }) });
-        if (r.status === 409) return toast('Chat changed while you were looking, reopen the list');
-      } catch (err) { return toast(err.message); }
-      toast('Chat deleted');
-      if (t === agT) return openThread(newThread());
+  draw();
+
+  function draw() {
+    const sel = chatSel;
+    body.innerHTML = heading(!!sel) + (metas.length
+      ? '<div class="rowlist">' + metas.map(m =>
+        `<button data-th="${esc(m.thread)}" class="${m.thread === agT ? 'cur' : ''}">
+          <span class="ric">${sel ? (sel.has(m.thread) ? '&#9745;' : '&#9744;') : '&#128172;'}</span>
+          <span class="rtx two">${esc(m.title)}${m.preview ? `<br><span class="muted" style="font-size:13px">${esc(m.preview)}</span>` : ''}</span>
+          <span class="muted" style="font-size:12px;flex-shrink:0;margin-left:6px">${ago(m.ts)}</span>
+          ${sel ? '' : `<span data-del="${esc(m.thread)}" class="muted"
+                style="flex-shrink:0;margin-left:8px;padding:2px 8px;font-size:16px">&#128465;</span>`}
+        </button>`).join('') + '</div>'
+      : '<div class="empty">No chats yet.</div>')
+      + (sel ? `<div class="actrow" style="margin:12px 4px 0">
+          <button class="ghost" id="chatall">${sel.size === metas.length ? 'None' : 'All'}</button>
+          <button class="primary" id="chatdel"${sel.size ? '' : ' disabled'}>Delete ${sel.size || ''}</button>
+        </div>` : '');
+
+    $('chatsel').onclick = () => { chatSel = chatSel ? null : new Set(); draw(); };
+    body.querySelectorAll('[data-th]').forEach(b => {
+      b.onclick = () => {
+        if (!chatSel) return openThread(b.dataset.th);
+        chatSel.has(b.dataset.th) ? chatSel.delete(b.dataset.th) : chatSel.add(b.dataset.th);
+        draw();
+      };
+    });
+    body.querySelectorAll('[data-del]').forEach(x => {
+      x.onclick = async e => {
+        e.stopPropagation();
+        const t = x.dataset.del;
+        if (!confirm('Delete this chat? It cannot be undone from the phone.')) return;
+        const bad = await deleteChat(t, (metas.find(m => m.thread === t) || {}).sha);
+        if (bad) return toast('Not deleted: ' + bad);
+        toast('Chat deleted');
+        if (t === agT) return openThread(newThread());
+        showChats();
+      };
+    });
+    if ($('chatall')) $('chatall').onclick = () => {
+      chatSel = new Set(sel.size === metas.length ? [] : metas.map(m => m.thread));
+      draw();
+    };
+    if ($('chatdel')) $('chatdel').onclick = async () => {
+      const picked = metas.filter(m => sel.has(m.thread));
+      if (!confirm(`Delete ${picked.length} chat${picked.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+      $('chatdel').disabled = true;
+      let failed = 0;
+      // sequential: each delete is its own commit on main, and GitHub rejects
+      // concurrent writes to the same branch tip
+      for (const m of picked) if (await deleteChat(m.thread, m.sha)) failed++;
+      toast(failed ? `${picked.length - failed} deleted, ${failed} failed` : `${picked.length} deleted`);
+      chatSel = null;
+      if (sel.has(agT)) return openThread(newThread());
       showChats();
     };
-  });
+  }
 }
 const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
