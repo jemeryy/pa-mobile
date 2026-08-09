@@ -194,44 +194,30 @@
     padding: 8px 4px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line);
     font-variant-numeric: tabular-nums; display: flex; gap: 6px; align-items: center; }
   .u-tot b { color: var(--ink); }
-  .u-blk { padding: 16px 0; border-bottom: 1px solid var(--line); }
-  .u-mark { display: inline-block; font: 12px ui-monospace, Menlo, Consolas, monospace;
-    background: var(--surface2); border-radius: 5px; padding: 3px 9px; color: var(--muted); }
-  .u-mark.demo { color: var(--accent); background: var(--accent-soft); }
-  .u-stats { font-size: 12px; color: var(--muted); margin-left: 8px;
+  .u-blk { display: grid; grid-template-columns: 1fr minmax(190px, 290px);
+    gap: 0 18px; align-items: start; padding: 3px 0; }
+  /* narrow: the note goes above the block it belongs to, as it is in the file */
+  @media (max-width: 780px) { .u-blk { grid-template-columns: 1fr; }
+    .u-blk .u-side { order: -1; } .u-blk .u-note { margin: 4px 0 2px; }
+    .u-addnote { padding: 2px 0 0; } }
+  .u-blk textarea { font-size: 15.5px; border: none; background: none;
+    padding: 6px 0; border-left: 2px solid transparent; }
+  .u-blk textarea:focus, .u-blk textarea:focus-visible { outline: none;
+    border-left-color: var(--accent); padding-left: 10px; }
+  .u-blk.head textarea { font-size: 17px; font-weight: 700; padding-top: 18px; }
+  .u-blk .u-stats { font-size: 11.5px; color: var(--muted);
     font-variant-numeric: tabular-nums; }
-  .u-lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
-    color: var(--muted); font-weight: 650; margin: 12px 0 4px; }
-  .u-lbl.anim { color: var(--accent); }
-  .u-blk textarea { font-size: 15px; }
-  .u-blk textarea.mono { font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
-    color: var(--muted); }
-  .u-cols { display: grid; grid-template-columns: minmax(280px, 420px) 1fr;
-    gap: 0 20px; align-items: start; }
-  @media (max-width: 780px) { .u-cols { grid-template-columns: 1fr; } }
-  .board { aspect-ratio: 16/9; background: #17181b; color: #f2f2ef;
-    border: 1px solid #2c2d31; border-radius: 8px; margin-top: 10px;
-    padding: 5% 6%; display: flex; flex-direction: column; justify-content: center;
-    overflow: hidden; line-height: 1.5;
-    font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
-    font-size: clamp(10px, 3vw, 14px); }
-  .board .b-kicker { font-size: .68em; letter-spacing: .12em; text-transform: uppercase;
-    color: #8f939b; margin-bottom: .9em; font-family: -apple-system, "Segoe UI", sans-serif; }
-  .board .v-line { margin: .3em 0; }
-  .board .v-line:nth-child(5n+2) { color: #f2f2ef; }
-  .board .v-line:nth-child(5n+3) { color: #ffd166; }
-  .board .v-line:nth-child(5n+4) { color: #7fd8c8; }
-  .board .v-line:nth-child(5n)   { color: #ff9e7d; }
-  .board .v-line:nth-child(5n+1) { color: #9ecbff; }
-  .screen { aspect-ratio: 16/9; background: #23282c; color: #d7dde1; border-radius: 8px;
-    margin-top: 10px; overflow: hidden; display: flex; flex-direction: column;
-    font-size: clamp(9px, 2.8vw, 13px); }
-  .screen .chrome { background: #31383d; padding: .5em .9em; font-size: .8em; color: #9aa5ac;
-    display: flex; gap: .5em; align-items: center; flex-shrink: 0; }
-  .screen .chrome i { width: .7em; height: .7em; border-radius: 50%; background: #57646c; }
-  .screen .body { padding: .9em 1.1em; overflow: hidden; line-height: 1.5; }
-  .u-prose { padding: 10px 0; }
-  .u-prose summary { color: var(--muted); font-size: 13px; font-weight: 600; padding: 4px 0; }
+  .u-blk hr { border: none; border-top: 1px solid var(--line); margin: 18px 0; }
+  .u-note { background: var(--surface2); border-radius: 8px; padding: 8px 10px;
+    margin-top: 8px; display: flex; gap: 6px; align-items: flex-start; }
+  .u-note textarea { font-size: 13px; line-height: 1.5; color: var(--muted);
+    padding: 0; border-left: none; }
+  .u-note textarea:focus { padding-left: 0; color: var(--ink); }
+  .u-note .x { background: none; border: none; color: var(--muted); font-size: 16px;
+    line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .u-addnote { background: none; border: none; color: var(--muted); font-size: 12.5px;
+    padding: 8px 0; opacity: .55; }
+  .u-blk:hover .u-addnote, .u-addnote:focus { opacity: 1; }
   .savebar { position: fixed; left: 0; right: 0; z-index: 40;
     bottom: calc(52px + env(safe-area-inset-bottom));
     background: var(--bg); border-top: 1px solid var(--line);
@@ -2300,56 +2286,55 @@ async function rawSave() {
   } catch (e) { toast('Save failed: ' + e.message); }
 }
 
-/* =============== Udemy script view =============== */
+/* =============== Udemy script view ===============
+   One continuous script: headings + narration paragraphs, each with an optional
+   on-screen note beside it (`note:` lines in the file, directly above the block
+   they annotate). Slide/animation markers are legacy: absorbed on read (visual:
+   and action: become notes; [SLIDE]/[DEMO]/anim:/resource: are dropped) and never
+   written back. */
 const WPM = 145;
-const ANIM_RE = /^anim:\s?/, VIS_RE = /^(visual:|action:)/, RES_RE = /^resource:\s?/;
+const NOTE_RE = /^(note|visual|action):\s?/;
+const DROP_RE = /^(anim|resource):|^\[(SLIDE|DEMO)\b/;
+const HEAD_RE = /^#{1,6} /, HR_RE = /^---+\s*$/;
 function uParse(text) {
-  const lines = text.split('\n');
-  const out = [];
-  let c = { kind: 'prose', marker: null, lines: [] };
-  const flush = () => { if (c.lines.length || c.kind === 'block') out.push(c); };
-  for (const line of lines) {
-    const m = line.match(/^\[(SLIDE|DEMO) [^\]]+\]\s*$/);
-    const ends = /^(#{1,3} |---\s*$)/.test(line);
-    if (m) { flush(); c = { kind: 'block', marker: line.trim(), lines: [] }; }
-    else if (ends && c.kind === 'block') { flush(); c = { kind: 'prose', marker: null, lines: [line] }; }
-    else c.lines.push(line);
+  const blocks = [];
+  let notes = [], para = [];
+  const push = (kind, t) => { blocks.push({ kind, text: t, note: notes.join('\n') }); notes = []; };
+  const flush = () => { if (para.length) { push('p', para.join('\n')); para = []; } };
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    if (NOTE_RE.test(line)) { notes.push(line.replace(NOTE_RE, '')); continue; }
+    if (DROP_RE.test(line)) continue;
+    if (!line.trim()) { flush(); continue; }
+    if (HEAD_RE.test(line)) { flush(); push('h', line); continue; }
+    if (HR_RE.test(line)) { flush(); push('hr', '---'); continue; }
+    para.push(line);
   }
   flush();
-  return out.map(s => {
-    if (s.kind === 'prose') return { kind: 'prose', text: s.lines.join('\n') };
-    const anim = s.lines.filter(l => ANIM_RE.test(l)).map(l => l.replace(ANIM_RE, ''));
-    const res = s.lines.filter(l => RES_RE.test(l)).map(l => l.replace(RES_RE, ''));
-    const vis = s.lines.filter(l => VIS_RE.test(l));
-    const narr = s.lines.filter(l => !ANIM_RE.test(l) && !VIS_RE.test(l) && !RES_RE.test(l));
-    while (narr.length && !narr[0].trim()) narr.shift();
-    while (narr.length && !narr[narr.length - 1].trim()) narr.pop();
-    return { kind: 'block', marker: s.marker, visual: vis.join('\n'), narr: narr.join('\n'), anim: anim.join('\n'), res: res.join('\n') };
-  });
+  if (notes.length) push('p', '');          // a note with nothing after it
+  return blocks;
 }
-function uSerialize(segs) {
-  return segs.map(s => {
-    if (s.kind === 'prose') return s.text;
-    const out = [s.marker];
-    out.push(...s.visual.split('\n').filter(l => l.trim()));
-    out.push(...s.anim.split('\n').filter(l => l.trim()).map(l => 'anim: ' + l.trim()));
-    out.push(...(s.res || '').split('\n').filter(l => l.trim()).map(l => 'resource: ' + l.trim()));
-    const narr = s.narr.replace(/\s+$/, '');
-    if (narr.trim()) { out.push(''); out.push(...narr.split('\n')); }
+function uSerialize(blocks) {
+  const out = [];
+  for (const b of blocks) {
+    const note = (b.note || '').trim(), text = (b.text || '').replace(/\s+$/, '');
+    if (!note && !text.trim()) continue;
+    if (note) out.push(...note.split('\n').map(l => 'note: ' + l.trim()));
+    if (text.trim()) out.push(...text.split('\n'));
     out.push('');
-    return out.join('\n');
-  }).join('\n');
+  }
+  return out.join('\n');
 }
 function narrWords(t) { t = t.trim(); return t ? t.split(/\s+/).length : 0; }
 function fmtDur(w) { const s = Math.round(w / WPM * 60); return Math.floor(s / 60) + ':' + pad(s % 60); }
-function uPreview(seg, el) {
-  const isDemo = seg.marker.startsWith('[DEMO');
-  const vLines = seg.visual.split('\n').map(l => l.trim())
-    .filter(l => VIS_RE.test(l)).map(l => l.replace(/^(visual:|action:)\s*/, ''));
-  const inner = vLines.join(' ').split(/(?<=[.:]) /).map(t => '<div class="v-line">' + esc(t) + '</div>').join('');
-  el.innerHTML = isDemo
-    ? '<div class="screen"><div class="chrome"><i></i><i></i><i></i>&nbsp;screen recording</div><div class="body">' + inner + '</div></div>'
-    : '<div class="board"><div class="b-kicker">sketch: dark canvas, hand-drawn</div>' + inner + '</div>';
+/* Narration = paragraphs after the first lecture heading, minus the metadata
+   lines (Status:/Target:/Format:) that top-and-tail a script file. */
+function uMarkNarr(blocks) {
+  let started = false;
+  for (const b of blocks) {
+    if (b.kind === 'h') { started = true; b.narr = false; continue; }
+    b.narr = started && b.kind === 'p' && !/^(status|target|format)\b/i.test(b.text.trim());
+  }
 }
 async function udemyView(path) {
   if (cur.path !== path) cur = await loadFile(path);
@@ -2358,7 +2343,7 @@ async function udemyView(path) {
     if (!uGuard()) return;
     leaveGuard = null; location.hash = '#/raw/' + encodeURIComponent(path);
   } }] });
-  let segs = uParse(cur.text);
+  let blocks = uParse(cur.text);
   let dirty = false;
   const draftKey = 'pa_draft_' + path;
   $('main').innerHTML = `
@@ -2375,66 +2360,67 @@ async function udemyView(path) {
     $('ubanner').innerHTML = `<div class="banner">A draft from an earlier failed save exists on this device.
       <div class="brow"><button class="primary" id="drRestore">Restore draft</button>
       <button class="ghost" id="drDiscard">Discard it</button></div></div>`;
-    $('drRestore').onclick = () => { segs = uParse(draft); localStorage.removeItem(draftKey); build(); markDirty(); $('ubanner').innerHTML = ''; };
+    $('drRestore').onclick = () => { blocks = uParse(draft); localStorage.removeItem(draftKey); build(); markDirty(); $('ubanner').innerHTML = ''; };
     $('drDiscard').onclick = () => { localStorage.removeItem(draftKey); $('ubanner').innerHTML = ''; };
   }
   function uGuard() { return !dirty || confirm('You have unsaved script edits. Leave and lose them?'); }
   leaveGuard = { check: uGuard, dirty: () => dirty, hash: '#/p/' + encodeURIComponent(path) };
   function markDirty() { dirty = true; $('usave').style.display = ''; }
   function totals() {
-    let w = 0; segs.forEach(s => { if (s.kind === 'block') w += narrWords(s.narr); });
+    uMarkNarr(blocks);
+    let w = 0; blocks.forEach(b => { if (b.narr) w += narrWords(b.text); });
     $('utot').innerHTML = `<b>${w}</b>&nbsp;narration words &middot; ~<b>${fmtDur(w)}</b>&nbsp;at ${WPM} wpm`;
   }
   function fit(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
   function build() {
+    uMarkNarr(blocks);
     const root = $('usegs'); root.innerHTML = '';
-    segs.forEach(seg => {
-      if (seg.kind === 'prose') {
-        if (!seg.text.trim()) return;
-        const d = document.createElement('details'); d.className = 'u-prose';
-        const firstLine = seg.text.split('\n').find(l => l.trim()) || 'notes';
-        d.innerHTML = `<summary>${esc(firstLine.replace(/^#+\s*/, '').slice(0, 60))}</summary>`;
-        const ta = document.createElement('textarea'); ta.className = 'mono';
-        ta.value = seg.text; ta.style.font = '13px/1.5 ui-monospace,Menlo,Consolas,monospace';
-        ta.addEventListener('input', () => { seg.text = ta.value; markDirty(); fit(ta); });
-        d.appendChild(ta);
-        d.addEventListener('toggle', () => { if (d.open) fit(ta); });
-        root.appendChild(d);
-        return;
-      }
-      const card = document.createElement('div'); card.className = 'u-blk';
-      const isDemo = seg.marker.startsWith('[DEMO');
-      card.innerHTML = `<div><span class="u-mark${isDemo ? ' demo' : ''}">${esc(seg.marker)}</span><span class="u-stats"></span></div>
-        <div class="u-cols"><div class="u-left"><div class="uprev"></div></div><div class="u-right"></div></div>`;
-      const prev = card.querySelector('.uprev');
-      const left = card.querySelector('.u-left');
-      const rightCol = card.querySelector('.u-right');
-      const stats = card.querySelector('.u-stats');
-      const refresh = () => {
-        const w = narrWords(seg.narr);
-        stats.textContent = w + ' words · ~' + fmtDur(w);
-        uPreview(seg, prev);
-      };
-      const mkField = (parent, lbl, cls, val, key, ph) => {
-        const l = document.createElement('div'); l.className = 'u-lbl' + (key === 'anim' ? ' anim' : ''); l.textContent = lbl;
-        const ta = document.createElement('textarea'); if (cls) ta.className = cls;
-        ta.value = val; ta.placeholder = ph || '';
-        ta.addEventListener('input', () => { seg[key] = ta.value; markDirty(); fit(ta); refresh(); if (key === 'narr') totals(); });
-        parent.appendChild(l); parent.appendChild(ta);
+    blocks.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'u-blk' + (b.kind === 'h' ? ' head' : '');
+      row.innerHTML = '<div class="u-body"></div><div class="u-side"></div>';
+      const body = row.querySelector('.u-body'), side = row.querySelector('.u-side');
+      if (b.kind === 'hr') body.innerHTML = '<hr>';
+      else {
+        // headings keep their markdown hashes in the file, never on screen
+        const pre = b.kind === 'h' ? (b.text.match(/^#{1,6} /) || ['## '])[0] : '';
+        const ta = document.createElement('textarea'); ta.value = b.text.slice(pre.length);
+        ta.placeholder = b.kind === 'h' ? 'Heading' : 'Narration';
+        if (pre === '# ') ta.style.fontSize = '20px';
+        const stats = document.createElement('div'); stats.className = 'u-stats';
+        const restat = () => { stats.textContent = b.narr ? narrWords(b.text) + ' words · ~' + fmtDur(narrWords(b.text)) : ''; };
+        ta.addEventListener('input', () => { b.text = pre + ta.value; markDirty(); fit(ta); restat(); totals(); });
+        body.appendChild(ta); body.appendChild(stats);
         requestAnimationFrame(() => fit(ta));
+        restat();
+      }
+      const drawSide = () => {
+        side.innerHTML = '';
+        if (b.kind === 'hr') return;
+        if (b.note == null || b.note === '') {
+          const add = document.createElement('button'); add.className = 'u-addnote';
+          add.textContent = '+ on-screen note';
+          add.onclick = () => { b.note = ' '; markDirty(); drawSide(); side.querySelector('textarea').focus(); };
+          side.appendChild(add);
+          return;
+        }
+        const wrap = document.createElement('div'); wrap.className = 'u-note';
+        const nta = document.createElement('textarea'); nta.value = b.note.trim();
+        nta.placeholder = 'What is on screen here';
+        nta.addEventListener('input', () => { b.note = nta.value; markDirty(); fit(nta); });
+        const x = document.createElement('button'); x.className = 'x'; x.title = 'Delete note';
+        x.innerHTML = '&times;';
+        x.onclick = () => { if (!nta.value.trim() || confirm('Delete this note?')) { b.note = ''; markDirty(); drawSide(); } };
+        wrap.appendChild(nta); wrap.appendChild(x); side.appendChild(wrap);
+        requestAnimationFrame(() => fit(nta));
       };
-      mkField(left, isDemo ? 'Action (on screen)' : 'Visual (on the slide)', 'mono', seg.visual, 'visual',
-        isDemo ? 'action: what happens on screen' : 'visual: what is drawn');
-      mkField(left, 'Animation plan', '', seg.anim, 'anim', 'What draws in, keyed to the narration');
-      mkField(left, 'Resources (for students)', 'mono', seg.res, 'res', 'One per line: file, link, or note to include with this lesson');
-      mkField(rightCol, 'Narration (spoken + captions)', '', seg.narr, 'narr', 'What the voice says over this slide');
-      root.appendChild(card);
-      refresh();
+      drawSide();
+      root.appendChild(row);
     });
     totals();
   }
   $('usavebtn').onclick = async () => {
-    let text = uSerialize(segs);
+    let text = uSerialize(blocks);
     if (!text.endsWith('\n')) text += '\n';
     $('usavebtn').disabled = true;
     try {
@@ -2445,7 +2431,7 @@ async function udemyView(path) {
         $('ubanner').innerHTML = `<div class="banner">The file changed elsewhere (probably Claude edited it), so your version was
           kept as a draft on this device instead of overwriting. Reloaded the latest file.
           <div class="brow"><button class="primary" onclick="location.reload()">OK</button></div></div>`;
-        segs = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+        blocks = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
         window.scrollTo(0, 0);
         return;
       }
@@ -2456,7 +2442,7 @@ async function udemyView(path) {
   };
   $('udiscard').onclick = () => {
     if (!confirm('Discard your edits and reload?')) return;
-    segs = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+    blocks = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
   };
   build();
 }
@@ -2936,7 +2922,7 @@ if (DEMO) {
       { title: 'Plans', path: 'plans', icon: '\u{1F5FA}' },
     ]),
     'context/current-priorities.md': '# Current priorities\n\n*Last updated: 2026-07-11*\n\n1. **SMU on-ramp** - matriculation admin, camps, Term 1 launch.\n2. **FARA** - make fara.sg profitable.\n\n## This week\n\n- [x] Matriculation forms\n- [ ] Book Bondue camp slot\n- [ ] FA weekly sweep review\n\nSome closing paragraph with a [link](../uni/roadmap.md) and `code`.\n',
-    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min) [slides]\n\nTarget: 3-4 min.\n\n[SLIDE 0.1-01]\nvisual: Dark canvas. Course title handwritten in white, centre.\nvisual: Three small doodles under it, one-word labels.\nanim: Title writes itself as the narration opens.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\n[DEMO 0.1-02]\naction: Show messy handwritten notes, then the clean output.\nanim: Zoom into the checklist.\nresource: prompt-cheatsheet.pdf\n\nWatch what I do here, because every technique gets its own lesson later.\n',
+    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min)\n\nTarget: 3-4 min.\n\nnote: Course title on a dark canvas, three doodles under it.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\nnote: Screen recording: messy handwritten notes, then the clean output.\n\nWatch what I do here, because every technique gets its own lesson later.\n',
   };
   loadFile = async path => ({ path, sha: 'demo',
     text: files[path] || '# ' + path.split('/').pop().replace(/\.md$/, '') + '\n\nDemo file.\n\n- [ ] item one\n- [x] item two\n' });
