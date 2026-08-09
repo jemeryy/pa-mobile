@@ -215,6 +215,9 @@
   .u-note textarea:focus { padding-left: 0; color: var(--ink); }
   .u-note .x { background: none; border: none; color: var(--muted); font-size: 16px;
     line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .u-tag { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+    font-weight: 700; color: var(--muted); opacity: .6; padding-top: 10px; }
+  .u-tag.narr { color: var(--accent); opacity: 1; }
   .u-addnote { background: none; border: none; color: var(--muted); font-size: 12.5px;
     padding: 8px 0; opacity: .55; }
   .u-blk:hover .u-addnote, .u-addnote:focus { opacity: 1; }
@@ -2397,6 +2400,11 @@ async function udemyView(path) {
       const drawSide = () => {
         side.innerHTML = '';
         if (b.kind === 'hr') return;
+        // say plainly what each block is: only "narration" gets read aloud
+        const tag = document.createElement('div');
+        tag.className = 'u-tag' + (b.narr ? ' narr' : '');
+        tag.textContent = b.kind === 'h' ? 'title' : b.narr ? 'narration' : 'not spoken';
+        side.appendChild(tag);
         if (b.note == null || b.note === '') {
           const add = document.createElement('button'); add.className = 'u-addnote';
           add.textContent = '+ on-screen note';
