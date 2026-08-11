@@ -472,12 +472,19 @@ async function loadFile(path) {
   const j = await ghGet(path);
   return { path, sha: j.sha, text: b64decode(j.content) };
 }
-/* returns new sha, or null on conflict (409) */
+/* returns new sha, or null on conflict (409).
+   A 409 with no `sha` is not a stale write, it is the branch head moving under us
+   mid-PUT (the box pushes every few seconds), so the write is simply lost. That is
+   how a Build tap could write its chat but never its job file: the job PUT raced a
+   box push, returned null, and nothing threw (2026-08-09, Yu Ern L24). Retry those. */
 async function saveFile(path, text, sha, msg) {
-  const r = await gh(path, { method: 'PUT', body: JSON.stringify({
-    message: msg || ('phone: edit ' + path), content: b64encode(text), sha, branch: 'main' }) });
-  if (r.status === 409) return null;
-  return (await r.json()).content.sha;
+  for (let i = 0; ; i++) {
+    const r = await gh(path, { method: 'PUT', body: JSON.stringify({
+      message: msg || ('phone: edit ' + path), content: b64encode(text), sha, branch: 'main' }) });
+    if (r.status !== 409) return (await r.json()).content.sha;
+    if (sha !== undefined || i === 2) return null;   // a real stale write: caller's call
+    await new Promise(s => setTimeout(s, 500 * (i + 1)));
+  }
 }
 
 /* =============== header / tabbar / router =============== */
@@ -689,7 +696,11 @@ async function runSkill(o) {
     project: proj || null, label: o.label || o.skill, state: 'queued',
     thread: id, created: nowIso(), updated: nowIso() };
   if (DEMO) return job;
-  await saveFile(JOB_PATH(id), JSON.stringify(job, null, 2) + '\n', undefined, 'phone: run ' + o.skill);
+  // the job file IS the run: if it did not land, say so instead of toasting "Sent"
+  // and leaving a Build button that looks like it was never pressed
+  if (await saveFile(JOB_PATH(id), JSON.stringify(job, null, 2) + '\n', undefined,
+                     'phone: run ' + o.skill) === null)
+    throw new Error('GitHub was busy, nothing started. Tap it again.');
   // open the thread now, so a build that has not spoken yet is still in the chat
   // list. `system` on purpose: a `user` line here would read as a question nobody
   // answered and the loop would eventually reply to it.
@@ -1005,6 +1016,10 @@ async function projView(key) {
   const mine = h => (h.jobs || []).filter(j => (j.project === key ||
     (j.project || '').startsWith(key + '.')) && j.state !== 'done');
   const jobs = mine(home);
+  // The one-tap on a student page is derived, never trusted from the file: the
+  // box writes it once and it is stale the moment a lesson is built or ticked
+  // (Nathanael's page offered "Build L14" while L13 was still untaught).
+  if (st.lessons && (st.lessons.items || []).length) st.one_tap = lessonButton();
   await Promise.all([drillDownRows(), checkBox()]);
   render();
   // Job state changes on the box, not here. Without this the page he left open
@@ -1077,7 +1092,9 @@ async function projView(key) {
           // "Build L<n>" everywhere they are created); the rest just cannot start
           // until it finishes, because they write the same manifest and doc
           const own = inflight.find(j => j.label === 'Build L' + it.n);
+          // built and untaught: say so instead of offering to build it again
           return `<div>${row}${own ? CHIPWRAP(own.state)
+            : it.built ? `<span class="muted" style="flex-shrink:0;padding:7px 12px;font-size:13px">built</span>`
             : `<button class="ghost" data-build="${i}"${building ? ' disabled' : ''}
                  style="padding:7px 12px;font-size:13.5px;flex-shrink:0">Build</button>`}</div>`;
         }).join('')}</div>`);
@@ -1086,7 +1103,7 @@ async function projView(key) {
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map((j, i) =>
         `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(j.label || j.skill)}</span>${
-          LIVE.includes(j.state) && j.state !== 'awaiting_check' && !boxQuiet
+          LIVE.includes(j.state)      // anything not finished can be killed, gate included
             ? `<button class="ghost" data-jstop="${i}" style="padding:5px 10px;font-size:13px;margin-right:8px">Stop</button>`
             : ''}${jobChip(j.state)}</div>`).join('')}</div>`);
     if ((st.rest || []).length)
@@ -1111,21 +1128,35 @@ async function projView(key) {
     $('main').querySelectorAll('[data-need]').forEach(b => { b.onclick = () => resolveNeed(+b.dataset.need, +b.dataset.act, b); });
     $('main').querySelectorAll('[data-jchat]').forEach(b => { b.onclick = () => {
       const j = jobs[+b.dataset.jchat]; if (j) openAgent(j.id); }; });
-    // Stop: the phone only writes files, so it sets `stop` on the job and the box
-    // kills the run on its next pass (agent_loop.apply_stops). Stopping leaves the
-    // job dead on purpose — the next thing said in its chat starts it again with
-    // whatever you changed, which is what stopping is for.
+    // Stop, at any point before the job finishes. The phone only writes files, so
+    // which write depends on whether anything is actually alive to kill:
+    //   running on a live box -> `stop: true`, and the box kills the subprocess on
+    //     its next pass (agent_loop.apply_stops) and closes the job honestly.
+    //   queued, parked at a gate, or a box gone quiet -> nothing is running, so the
+    //     phone closes it itself. Clearing the gate is part of the kill: left on, the
+    //     card keeps asking a question about a job that is dead.
+    // Either way it lands in `failed`, terminal on purpose — the next thing said in
+    // its chat starts it again with whatever you changed.
     $('main').querySelectorAll('[data-jstop]').forEach(b => { b.onclick = async ev => {
       ev.stopPropagation();                        // the row itself opens the chat
       const j = jobs[+b.dataset.jstop]; if (!j) return;
+      if (!confirm('Stop ' + (j.label || j.skill) + '? It will not finish.')) return;
       b.disabled = true;
       try {
         const f = await loadFile(JOB_PATH(j.id));
         const job = JSON.parse(f.text);
         if (!LIVE.includes(job.state)) throw new Error('That already finished.');
-        await saveFile(JOB_PATH(j.id), JSON.stringify(
-          { ...job, stop: true, updated: nowIso() }, null, 2) + '\n', f.sha, 'phone: stop');
-        toast('Stopping. Say what to change in its chat and it starts again from there.');
+        if (job.state === 'running' && !boxQuiet) {
+          const sha = await saveFile(JOB_PATH(j.id), JSON.stringify(
+            { ...job, stop: true, updated: nowIso() }, null, 2) + '\n', f.sha, 'phone: stop');
+          if (!sha) throw new Error('The agent changed this job while you were looking. Reload.');
+          toast('Stopping. Say what to change in its chat and it starts again from there.');
+        } else {
+          await flipJob(j.id, 'failed', { gate: null, stop: null, error: 'you stopped this' });
+          j.state = 'failed'; j.gate = null;
+          render();
+          toast('Stopped.');
+        }
       } catch (e) { toast(e.message); b.disabled = false; }
     }; });
     $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
@@ -1152,8 +1183,13 @@ async function projView(key) {
         const L = cs.lessons;
         if (!L) return;
         const taught = L.base + L.items.filter(i => i.taught).length;
-        const next = (L.items.find(i => !i.taught) || {}).n;
-        r.sub = `${taught} taught` + (next == null ? ', package finished' : `, next is L${next}`);
+        const nx = L.items.find(i => !i.taught) || {};
+        r.sub = `${taught} taught` + (nx.n == null ? ', package finished'
+          : nx.built ? `, L${nx.n} built, tick it when taught` : `, next is L${nx.n}`);
+        // Built but not yet taught: nothing to build here. The button comes back
+        // for L<n+1> the moment he ticks L<n>. Derived, so a stale one_tap written
+        // before the build finished cannot put the button back.
+        if (nx.built) delete r.action;
       } catch (e) { /* no child page or a bad read: keep what the agent wrote */ }
     }));
   }
@@ -1162,10 +1198,13 @@ async function projView(key) {
      Mirrors tools/chess/tick_lesson.py + the update_state pass. */
   function lessonButton() {
     const L = st.lessons, student = key.replace(/^chess\./, '');
-    const next = (L.items.find(i => !i.taught) || {}).n;
-    return next == null
-      ? [{ label: 'Plan next 10', skill: 'plan-chess-package', args: { student } }]
-      : [{ label: 'Build L' + next, skill: 'build-chess-lesson', args: { student, lesson: next } }];
+    const next = L.items.find(i => !i.taught) || {};
+    if (next.n == null)
+      return [{ label: 'Plan next 10', skill: 'plan-chess-package', args: { student } }];
+    // already built and waiting to be taught: no button until he ticks it
+    return next.built ? []
+      : [{ label: 'Build L' + next.n, skill: 'build-chess-lesson',
+           args: { student, lesson: next.n } }];
   }
   /* Tick/untick a lesson: flip taught, refresh the button, persist the state
      file. The Google Doc's ✅ is reconciled by tools/chess/tick_lesson.py (the
@@ -1296,7 +1335,8 @@ function saveBoxTok() {
   $('bstat').className = 'stat' + (boxTok ? ' ok' : '');
   toast(boxTok ? 'Live activity on.' : 'Live activity off.');
 }
-const LIVE_KEEP = 40;                       // a phone screen, not a whole transcript
+const LIVE_KEEP = 300;   // the whole thread's turns now, not one screen: each turn's
+                         // block is collapsed, so this costs scroll height, not clutter
 async function agActivity() {
   // Every thread streams now, chats included (agent_loop passes the thread as the
   // stream key). A thread the box has not run yet simply has no lines yet.
@@ -1410,8 +1450,7 @@ function optSelect(id, pairs, cur) {
    It outlives routing on purpose (that is what lets a message say "this page"),
    so it owns its own poll timer instead of the router's viewCleanup. */
 let agT = '', agMsgs = [], agSha, agText0 = '', agSending = false, agTimer = null, agRec = null;
-let agLive = [], agLiveNext = 0;      // what the box says this build is doing right now
-let agLiveDone = {};                  // reply id -> the commentary that produced it (collapsed)
+let agLive = [], agLiveNext = 0;      // the box's ordered log for this thread, all turns
 
 function agentOpen() { return document.body.classList.contains('agent-open'); }
 /* Which page he is looking at, as something the box can open: a repo path where
@@ -1562,7 +1601,7 @@ function closeAgent() {
 async function openThread(t) {
   agT = t; sessionStorage.setItem('pa_thread', t);
   agMsgs = []; agSha = undefined; agText0 = '';
-  agLive = []; agLiveNext = 0; agLiveDone = {};
+  agLive = []; agLiveNext = 0;
   clearInterval(agTimer); agTimer = null;
   $('atitle').textContent = 'Agent';
   $('abody').innerHTML = `
@@ -1591,17 +1630,33 @@ function liveBlock(lines, open) {
       open ? 'Thinking…' : `Thinking (${lines.length} steps)`}</summary>${
     lines.map(l => `<div class="lv ${esc(l.kind || '')}">${esc(l.text || '')}</div>`).join('')}</details>`;
 }
+/* The box streams ONE ordered log per thread and a `done` line closes each turn,
+   so the segments between `done`s map one-for-one onto the assistant messages.
+   Pairing them puts each turn's thinking directly above the reply it produced,
+   and the whole panel reads in order: thinking, reply, his message, thinking,
+   reply. Aligned from the END, because LIVE_KEEP drops the oldest lines first. */
+function agTurns() {
+  const segs = [[]];
+  for (const l of agLive) { if (l.kind === 'done') segs.push([]); else segs[segs.length - 1].push(l); }
+  const tail = segs.pop() || [];                  // no `done` yet: still running, goes last
+  const ai = agMsgs.filter(m => m.role === 'assistant');
+  const use = segs.filter(s => s.length).slice(-ai.length);
+  const own = {};
+  use.forEach((s, i) => { own[ai[ai.length - use.length + i].id] = s; });
+  return { own, tail };
+}
 function agRender() {
   const log = $('chatlog'); if (!log) return;
   const waiting = agMsgs.length && agMsgs[agMsgs.length - 1].role === 'user';
+  const { own, tail } = agTurns();
   log.innerHTML = (agMsgs.length
     ? agMsgs.map(m => m.role === 'system' ? `<div class="sysline">${esc(m.text)}</div>`
       : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
-      : liveBlock(agLiveDone[m.id], false)
+      : liveBlock(own[m.id], false)
         + `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
            m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
-    + liveBlock(agLive, true)
+    + liveBlock(tail, true)
     + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
   showPage();
@@ -1618,9 +1673,12 @@ async function agPoll() {
     agSha = j.sha; agText0 = b64decode(j.content); agMsgs = chatParse(agText0);
     const fresh = agMsgs.slice(agMsgs.findIndex(m => m.id === before) + 1);
     const reply = fresh.filter(m => m.role === 'assistant').pop();
-    // the running commentary was about producing THIS reply, so it moves above it
-    // and collapses; leaving it live at the bottom reads as a second thing still running
-    if (reply) { if (agLive.length) agLiveDone[reply.id] = agLive; agLive = []; agLiveNext = 0; }
+    // The reply can land before the box's own `done` line does. Close the turn here
+    // so this commentary snaps above the reply straight away instead of sitting at
+    // the bottom reading as a second thing still running (the real `done` then just
+    // opens an empty segment, which agTurns drops).
+    if (reply && agLive.length && agLive[agLive.length - 1].kind !== 'done')
+      agLive.push({ kind: 'done', text: 'finished' });
     agRender();
     if (reply) speak(reply.text);
   } catch (e) { /* 404 (no thread yet) or transient: ignore */ }
