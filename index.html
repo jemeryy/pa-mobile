@@ -566,6 +566,18 @@ async function route() {
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', e => { if (leaveGuard && leaveGuard.dirty()) e.preventDefault(); });
 
+/* Any link that leaves the app opens in a new tab, so tapping a doc or a chess
+   board never loses your place here. In-app routes are `#/...` on this host and
+   stay put. Delegated on purpose: it covers markdown links in chat and job
+   output too, which no per-link `target` ever reaches. */
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (a && /^https?:/i.test(a.getAttribute('href')) && a.host !== location.host) {
+    a.target = '_blank';
+    a.rel = 'noopener';
+  }
+}, true);
+
 /* =============== first-run: GitHub token =============== */
 function tokenView() {
   setHeader('Welcome');
