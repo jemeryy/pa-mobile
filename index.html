@@ -1401,7 +1401,7 @@ function chatMsg(role, text, extra) {
 }
 const DEMO_CHAT = [
   { id: 'm-1', role: 'user', text: 'How is the lesson build going?' },
-  { id: 'm-2', role: 'assistant', text: 'Lesson 12 preview is ready, waiting for your check. Two boards were rebuilt because the first images were blurry.\n\nWant me to start sourcing lesson 13 while you review?' },
+  { id: 'm-2', role: 'assistant', text: 'Lesson 12 preview is ready, waiting for your check. Two boards were rebuilt because the first images were blurry.\n\nWant me to start sourcing lesson 13 while you review?', ctx: { used: 32394, limit: 1000000 } },
   { id: 'm-3', role: 'user', text: 'Yes, start on 13' },
 ];
 /* Voice: the phone's own speech engine, no service, no model. Input is a bonus
@@ -1450,7 +1450,8 @@ async function chatMetas() {
    --model / --effort; the pick persists so the next new chat inherits it. */
 const CHAT_MODELS = [['Sonnet 4.6', 'claude-sonnet-4-6'], ['Sonnet 5', 'claude-sonnet-5'],
   ['Opus 5', 'claude-opus-5'], ['Haiku 4.5', 'claude-haiku-4-5-20251001'],
-  ['Fable 5', 'claude-fable-5'], ['Opus 4.8', 'claude-opus-4-8']];
+  ['Fable 5', 'claude-fable-5'], ['Opus 4.8', 'claude-opus-4-8'],
+  ['Codex (GPT)', 'codex']];       // the other subscription; see run_codex
 const CHAT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 let selModel = localStorage.getItem('pa_model') || 'claude-sonnet-4-6';
 let selEffort = localStorage.getItem('pa_effort') || 'medium';
@@ -1633,6 +1634,15 @@ async function openThread(t) {
   agTimer = setInterval(agPoll, 5000);
   agActivity();
 }
+/* How full this conversation's context window was at the end of the turn, which
+   is the number that decides when to start a new chat. Written by agent_loop
+   (LAST_CTX); older messages have none, so it just does not show. */
+function ctxLine(c) {
+  if (!c || !c.limit) return '';
+  const k = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : Math.round(n / 1000) + 'k';
+  const pct = Math.round(100 * c.used / c.limit);
+  return `<span class="by">context ${k(c.used)} / ${k(c.limit)} · ${pct}%</span>`;
+}
 /* The running commentary, above the answer it produced. Open while it is still
    thinking; once the reply lands it collapses to one summary line, because by
    then the answer is what he wants to read. */
@@ -1666,7 +1676,7 @@ function agRender() {
       : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
       : liveBlock(own[m.id], false)
         + `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
-           m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
+           m.by === 'gemma' ? '<span class="by">routed locally</span>' : ctxLine(m.ctx)}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
     + liveBlock(tail, true)
     + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
