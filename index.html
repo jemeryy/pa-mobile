@@ -342,8 +342,18 @@
   .bubble.ai .by { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
   .sysline { font-size: 13px; color: var(--muted); font-style: italic;
     margin: 6px 4px 10px; }
+  /* The pickers and the context gauge stay put while the chat scrolls under
+     them: how full the window is decides when to start a new chat, so it is
+     useless if he has to scroll back up to the first message to see it. */
+  .chattop { position: sticky; top: -12px; z-index: 3; background: var(--bg);
+    margin: -12px -12px 12px; padding: 12px 12px 8px; border-bottom: 1px solid var(--line); }
+  .ctxtrack { height: 4px; border-radius: 3px; background: var(--line);
+    margin-top: 8px; overflow: hidden; }
+  .ctxfill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .ctxfill.full { background: var(--warn); }
+  .ctxlbl { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
   /* model + effort pickers, one compact row at the top of a chat */
-  .chatopts { display: flex; gap: 8px; margin-bottom: 12px; }
+  .chatopts { display: flex; gap: 8px; }
   .chatopts select { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--surface); color: var(--ink);
     font: inherit; font-size: 13px; font-weight: 550; }
@@ -1451,8 +1461,27 @@ async function chatMetas() {
 const CHAT_MODELS = [['Sonnet 4.6', 'claude-sonnet-4-6'], ['Sonnet 5', 'claude-sonnet-5'],
   ['Opus 5', 'claude-opus-5'], ['Haiku 4.5', 'claude-haiku-4-5-20251001'],
   ['Fable 5', 'claude-fable-5'], ['Opus 4.8', 'claude-opus-4-8'],
-  ['Codex (GPT)', 'codex']];       // the other subscription; see run_codex
+  // The other subscription (see run_codex). Slugs and the reasoning levels each
+  // one accepts come from ~/.codex/models_cache.json; a model offered an effort
+  // it does not support fails the whole turn, so the list is per model.
+  ['Codex 5.6-Sol', 'codex:gpt-5.6-sol'], ['Codex 5.6-Terra', 'codex:gpt-5.6-terra'],
+  ['Codex 5.6-Luna', 'codex:gpt-5.6-luna'], ['Codex 5.5', 'codex:gpt-5.5'],
+  ['Codex 5.4', 'codex:gpt-5.4'], ['Codex 5.4-Mini', 'codex:gpt-5.4-mini']];
 const CHAT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_EFFORTS = {
+  'codex:gpt-5.6-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  'codex:gpt-5.6-terra': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  'codex:gpt-5.6-luna': ['low', 'medium', 'high', 'xhigh', 'max'],
+  'codex:gpt-5.5': ['low', 'medium', 'high', 'xhigh'],
+  'codex:gpt-5.4': ['low', 'medium', 'high', 'xhigh'],
+  'codex:gpt-5.4-mini': ['low', 'medium', 'high', 'xhigh'],
+};
+const effortsFor = m => CODEX_EFFORTS[m] || CHAT_EFFORTS;
+const effortSelect = () => optSelect('opteffort',
+  effortsFor(selModel).map(e => [e[0].toUpperCase() + e.slice(1), e]), selEffort);
+function bindEffort() {
+  $('opteffort').onchange = e => { selEffort = e.target.value; localStorage.setItem('pa_effort', selEffort); };
+}
 let selModel = localStorage.getItem('pa_model') || 'claude-sonnet-4-6';
 let selEffort = localStorage.getItem('pa_effort') || 'medium';
 function optSelect(id, pairs, cur) {
@@ -1618,14 +1647,24 @@ async function openThread(t) {
   clearInterval(agTimer); agTimer = null;
   $('atitle').textContent = 'Agent';
   $('abody').innerHTML = `
-    <div class="chatopts">
-      ${optSelect('optmodel', CHAT_MODELS, selModel)}
-      ${optSelect('opteffort', CHAT_EFFORTS.map(e => [e[0].toUpperCase() + e.slice(1), e]), selEffort)}
+    <div class="chattop">
+      <div class="chatopts">
+        ${optSelect('optmodel', CHAT_MODELS, selModel)}
+        <span id="optefforts">${effortSelect()}</span>
+      </div>
+      <div id="actx"></div>
     </div>
     <div class="pgctx" id="apgctx"></div>
     <div id="chatlog">${skels(2)}</div>`;
-  $('optmodel').onchange = e => { selModel = e.target.value; localStorage.setItem('pa_model', selModel); };
-  $('opteffort').onchange = e => { selEffort = e.target.value; localStorage.setItem('pa_effort', selEffort); };
+  $('optmodel').onchange = e => {
+    selModel = e.target.value; localStorage.setItem('pa_model', selModel);
+    // codex models take different reasoning levels from Claude's, and one it does
+    // not know fails the whole turn, so the second picker follows the first
+    if (!effortsFor(selModel).includes(selEffort)) selEffort = 'medium';
+    $('optefforts').innerHTML = effortSelect(); bindEffort();
+    localStorage.setItem('pa_effort', selEffort);
+  };
+  bindEffort();
   if (DEMO) { agMsgs = t === 'main' ? DEMO_CHAT : []; agRender(); return; }
   const f = await loadFile(chatPath(t)).catch(() => null);
   if (agT !== t) return;                                  // switched threads mid-load
@@ -1634,14 +1673,18 @@ async function openThread(t) {
   agTimer = setInterval(agPoll, 5000);
   agActivity();
 }
-/* How full this conversation's context window was at the end of the turn, which
-   is the number that decides when to start a new chat. Written by agent_loop
-   (LAST_CTX); older messages have none, so it just does not show. */
-function ctxLine(c) {
-  if (!c || !c.limit) return '';
+/* How full this conversation's context window is, as of the last reply: the
+   number that decides when to start a new chat. agent_loop puts it on each
+   assistant message (LAST_CTX); the bar shows the newest one it can find, so a
+   thread from before this existed just reads as unknown until the next reply. */
+function ctxBar(msgs) {
+  const c = (msgs || []).filter(m => m.ctx && m.ctx.limit).pop();
+  if (!c) return '<span class="ctxlbl">context: known after the next reply</span>';
   const k = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : Math.round(n / 1000) + 'k';
-  const pct = Math.round(100 * c.used / c.limit);
-  return `<span class="by">context ${k(c.used)} / ${k(c.limit)} · ${pct}%</span>`;
+  const pct = Math.round(100 * c.ctx.used / c.ctx.limit);
+  return `<div class="ctxtrack"><div class="ctxfill${pct >= 75 ? ' full' : ''}" style="width:${
+      Math.min(100, pct)}%"></div></div><span class="ctxlbl">context ${
+      k(c.ctx.used)} / ${k(c.ctx.limit)} · ${pct}%${pct >= 75 ? ' — worth a new chat soon' : ''}</span>`;
 }
 /* The running commentary, above the answer it produced. Open while it is still
    thinking; once the reply lands it collapses to one summary line, because by
@@ -1676,10 +1719,11 @@ function agRender() {
       : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
       : liveBlock(own[m.id], false)
         + `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
-           m.by === 'gemma' ? '<span class="by">routed locally</span>' : ctxLine(m.ctx)}</div>`).join('')
+           m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
     + liveBlock(tail, true)
     + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
+  if ($('actx')) $('actx').innerHTML = ctxBar(agMsgs);
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
   showPage();
   const body = $('abody'); if (body) body.scrollTop = body.scrollHeight;
