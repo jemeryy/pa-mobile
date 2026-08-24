@@ -706,7 +706,15 @@ function jobChip(state) {
   return `<span class="chip ${JOB_CLASS[state] || ''}">${JOB_WORDS[state] || esc(state)}</span>`;
 }
 /* Fire a skill: the phone writes the job file, the agent picks it up. */
-async function runSkill(o) {
+/* What a tap is ABOUT: skill + the student it writes for (+ lesson). Two taps with
+   the same key are the same job, whichever button they came from. */
+function jobKey(o) {
+  const a = o.args || {};
+  return [o.skill, o.project || '', a.student || '', a.lesson == null ? '' : a.lesson].join('|');
+}
+// keys whose write has not landed yet: a second tap on any of them is rejected
+const pendingKeys = new Set();
+function newJob(o) {
   const id = 'j-' + Math.random().toString(16).slice(2, 12);
   // fired from a parent page but about one student -> file it under that student's
   // page, so his gate shows where he goes looking for it
@@ -714,9 +722,13 @@ async function runSkill(o) {
   const proj = sub && o.project ? o.project.split('.')[0] + '.' + sub : o.project;
   // a job's thread is its own id (mirrors agent_loop.create_job): the build's
   // questions, his answers and the result all land in one chat he can read back
-  const job = { id, skill: o.skill, args: o.args || {}, prompt: o.prompt || null,
+  return { id, skill: o.skill, args: o.args || {}, prompt: o.prompt || null,
     project: proj || null, label: o.label || o.skill, state: 'queued',
     thread: id, created: nowIso(), updated: nowIso() };
+}
+async function runSkill(o, job) {
+  job = job || newJob(o);
+  const id = job.id;
   if (DEMO) return job;
   // the job file IS the run: if it did not land, say so instead of toasting "Sent"
   // and leaving a Build button that looks like it was never pressed
@@ -725,9 +737,11 @@ async function runSkill(o) {
     throw new Error('GitHub was busy, nothing started. Tap it again.');
   // open the thread now, so a build that has not spoken yet is still in the chat
   // list. `system` on purpose: a `user` line here would read as a question nobody
-  // answered and the loop would eventually reply to it.
-  await saveFile(chatPath(id), JSON.stringify(chatMsg('system', (o.label || o.skill) + ' started')) + '\n',
-                 undefined, 'phone: open ' + o.skill + ' chat').catch(() => {});
+  // answered and the loop would eventually reply to it. Best effort, not awaited:
+  // the job file is the run, and the box opens the thread itself if this misses.
+  saveFile(chatPath(id), JSON.stringify(chatMsg('system', (o.label || o.skill) + ' started')) + '\n',
+           undefined, 'phone: open ' + o.skill + ' chat').catch(() => {});
+  upsertHomeJob(job);       // so it survives a reload before the agent rewrites home
   return job;
 }
 /* Flip a job's state (approve, ask for changes). The phone writes the mailbox
@@ -1038,6 +1052,10 @@ async function projView(key) {
   const mine = h => (h.jobs || []).filter(j => (j.project === key ||
     (j.project || '').startsWith(key + '.')) && j.state !== 'done');
   const jobs = mine(home);
+  const local = [];   // jobs this page started: kept until home.json has them
+  const LIVE = ['queued', 'running', 'awaiting_check'];
+  const at = t => (t && t.skill && jobs.find(j => LIVE.includes(j.state) && j.skill === t.skill &&
+    j.project === ((t.args || {}).student ? key.split('.')[0] + '.' + t.args.student : key)) || {}).state || '';
   // The one-tap on a student page is derived, never trusted from the file: the
   // box writes it once and it is stale the moment a lesson is built or ticked
   // (Nathanael's page offered "Build L14" while L13 was still untaught).
@@ -1056,7 +1074,9 @@ async function projView(key) {
       const f = await loadFile(HOME_PATH).catch(() => null);
       if (!f) return;                               // blip: keep what is on screen
       const fresh = mine(JSON.parse(f.text));
-      jobs.length = 0; jobs.push(...fresh);
+      for (let i = local.length - 1; i >= 0; i--)
+        if (fresh.some(j => j.id === local[i].id)) local.splice(i, 1);
+      jobs.length = 0; jobs.push(...local, ...fresh);
       await checkBox();                             // a silent box unmasks dead jobs
       if (sig() === seen) return;
       seen = sig();
@@ -1083,10 +1103,7 @@ async function projView(key) {
     // Yu Ern button sitting on the parent Chess page must still go while Yu
     // Ern is building, which keying on the page alone would miss.
     // `awaiting_check` counts as in flight: that build's doc is half written.
-    const LIVE = ['queued', 'running', 'awaiting_check'];
     const inflight = jobs.filter(j => LIVE.includes(j.state));
-    const at = t => (t && t.skill && inflight.find(j => j.skill === t.skill &&
-      j.project === ((t.args || {}).student ? key.split('.')[0] + '.' + t.args.student : key)) || {}).state || '';
     const CHIPWRAP = s => `<span style="flex-shrink:0;padding:7px 2px">${jobChip(s)}</span>`;
     if (gated.length || (st.needs_you || []).length)
       parts.push(`<div class="sect">Needs you</div>${gateCards(gated)}${needsCards(st.needs_you || [])}`);
@@ -1231,29 +1248,42 @@ async function projView(key) {
   /* Tick/untick a lesson: flip taught, refresh the button, persist the state
      file. The Google Doc's ✅ is reconciled by tools/chess/tick_lesson.py (the
      box can't write Docs); this owns the record the phone and that script read. */
+  const lesBusy = new Set();   // rows mid-write: a second tap is refused, it does not toggle back
   async function toggleLesson(i, btn) {
     const it = st.lessons.items[i]; if (!it) return;
+    if (lesBusy.has(i)) return toast('Still saving that one.');
+    lesBusy.add(i);
     it.taught = !it.taught;
     st.one_tap = lessonButton();
+    // Ticking IS passing the review: clear any card still waiting on this lesson
+    // (its "passed review" action carries `tick: N`) so he never clears it twice.
+    const kept = st.needs_you || [];
+    const gone = it.taught ? kept.filter(n => (n.actions || []).some(a => a.tick === it.n)) : [];
+    if (gone.length) st.needs_you = kept.filter(n => !gone.includes(n));
     render();                                  // optimistic: the tap feels instant
+    toast(it.taught ? `Lesson ${it.n} ticked` : `Lesson ${it.n} unticked`);
     try {
-      await persistLessons();
-      toast(it.taught ? `Lesson ${it.n} ticked` : `Lesson ${it.n} unticked`);
-    } catch (e) { it.taught = !it.taught; st.one_tap = lessonButton(); toast(e.message); render(); }
+      await Promise.all([persistLessons(), ...gone.map(g => clearHomeAttention(g.title))]);
+    } catch (e) {
+      it.taught = !it.taught; st.one_tap = lessonButton(); st.needs_you = kept;
+      toast(e.message); render();
+    } finally { lesBusy.delete(i); }
   }
   // Taps are optimistic, so two quick ticks would race on the same file sha:
   // chain the writes, each one re-reading the sha it is writing against.
   let saving = Promise.resolve();
   function persistLessons() {
-    saving = saving.catch(() => {}).then(writeLessons);
+    saving = saving.catch(() => {}).then(() => writeState('phone: tick lesson'));
     return saving;
   }
-  async function writeLessons() {
+  // the one writer of this page's state file: lessons, button and cards together
+  async function writeState(msg) {
     if (DEMO) return;
     const f = await loadFile(STATE_PATH(key));
     const state = JSON.parse(f.text);
-    state.lessons = st.lessons; state.one_tap = st.one_tap;
-    await saveFile(STATE_PATH(key), JSON.stringify(state, null, 2) + '\n', f.sha, 'phone: tick lesson');
+    state.needs_you = st.needs_you || [];
+    if (st.lessons) { state.lessons = st.lessons; state.one_tap = st.one_tap; }
+    await saveFile(STATE_PATH(key), JSON.stringify(state, null, 2) + '\n', f.sha, msg);
   }
   /* Resolve a needs_you card: run its action (a note to the agent, maybe a
      skill), then clear it from this page's state file AND the home feed so it
@@ -1267,25 +1297,34 @@ async function projView(key) {
       if (v === null) return;                        // cancelled: leave the card
       note = v.trim();
     }
-    btn.disabled = true;
+    const skillJob = act && act.skill
+      ? { project: key, skill: act.skill, args: act.args || {}, label: act.label } : null;
+    if (skillJob && (at(skillJob) || pendingKeys.has(jobKey(skillJob)))) return toast('Already going.');
+    // the card goes now; the writes follow. A failed write puts it back.
+    const job = skillJob ? newJob(skillJob) : null;
+    if (job) { pendingKeys.add(jobKey(skillJob)); jobs.unshift(job); local.push(job); }
+    // a review card can carry `tick: N`: passing review IS the done-tick, so
+    // flip the lesson taught here too (the chess-tick Action puts ✅ in the Doc).
+    const ticked = act && act.tick != null && st.lessons
+      ? (st.lessons.items || []).find(x => x.n === act.tick && !x.taught) : null;
+    if (ticked) { ticked.taught = true; st.one_tap = lessonButton(); }
+    st.needs_you.splice(ni, 1);
+    render();
+    toast(act ? 'Sent to the agent.' : 'Cleared.');
     try {
+      const writes = [persistNeeds(), clearHomeAttention(item.title)];
       if (act) {
         const said = act.say || `${act.label}: ${item.title}`;
-        await appendChat(note ? `${said} — ${note}` : said);
-        if (act.skill) await runSkill({ project: key, skill: act.skill, args: act.args || {}, label: act.label });
+        writes.push(appendChat(note ? `${said} — ${note}` : said));
+        if (job) writes.push(runSkill(skillJob, job).finally(() => pendingKeys.delete(jobKey(skillJob))));
       }
-      // a review card can carry `tick: N`: passing review IS the done-tick, so
-      // flip the lesson taught here too (the chess-tick Action puts ✅ in the Doc).
-      if (act && act.tick != null && st.lessons) {
-        const it = (st.lessons.items || []).find(x => x.n === act.tick);
-        if (it) { it.taught = true; st.one_tap = lessonButton(); }
-      }
-      st.needs_you.splice(ni, 1);
-      await persistNeeds();
-      await clearHomeAttention(item.title);
-      render();
-      toast(act ? 'Sent to the agent.' : 'Cleared.');
-    } catch (e) { toast(e.message); btn.disabled = false; }
+      await Promise.all(writes);
+    } catch (e) {
+      st.needs_you.splice(ni, 0, item);
+      if (ticked) { ticked.taught = false; st.one_tap = lessonButton(); }
+      if (job) { jobs.splice(jobs.indexOf(job), 1); local.splice(local.indexOf(job), 1); }
+      render(); toast(e.message);
+    }
   }
   async function appendChat(text) {
     if (DEMO) return;
@@ -1294,12 +1333,9 @@ async function projView(key) {
     await saveFile(CHAT_PATH, base + JSON.stringify(chatMsg('user', text)) + '\n',
                    f ? f.sha : undefined, 'phone: resolve note');
   }
-  async function persistNeeds() {
-    if (DEMO) return;
-    const f = await loadFile(STATE_PATH(key));
-    const state = JSON.parse(f.text); state.needs_you = st.needs_you;
-    if (st.lessons) { state.lessons = st.lessons; state.one_tap = st.one_tap; }
-    await saveFile(STATE_PATH(key), JSON.stringify(state, null, 2) + '\n', f.sha, 'phone: resolve needs_you');
+  function persistNeeds() {
+    saving = saving.catch(() => {}).then(() => writeState('phone: resolve needs_you'));
+    return saving;
   }
   async function clearHomeAttention(title) {
     if (DEMO) return;
@@ -1314,6 +1350,9 @@ async function projView(key) {
     } catch (e) { /* best effort: the state file is already cleared */ }
   }
   async function fire(t, b) {
+    // same target already queued, running, or still being written: refuse the tap
+    if (t.job ? pendingKeys.has('job|' + t.job) : (at(t) || pendingKeys.has(jobKey(t))))
+      return toast('Already going.');
     let said = '';
     if (t.ask) {
       const v = prompt(t.ask);
@@ -1322,23 +1361,30 @@ async function projView(key) {
     }
     if (t.confirm && !confirm(t.confirm)) return;
     b.disabled = true;
-    try {
-      if (t.job) {
-        // the gate: nothing moves past your check until this flip is committed
-        await flipJob(t.job, t.to || 'running', said ? { note: said } : {});
-        const j = jobs.find(x => x.id === t.job);
-        if (j) { j.state = t.to || 'running'; if (said) j.note = said; }
-        st.one_tap = [];                       // this decision is made; don't offer it twice
-        toast('Sent to the agent.');
-      } else {
-        const args = said ? Object.assign({}, t.args || {}, { input: said }) : (t.args || {});
-        const job = await runSkill({ project: key, skill: t.skill, args, label: t.label });
-        jobs.unshift(Object.assign({}, job, { state: 'queued' }));
-        upsertHomeJob(job);       // so it survives a reload before the agent rewrites home
-        toast('Sent. Watch it under Work.');
-      }
-      render();
-    } catch (e) { toast(e.message); b.disabled = false; }
+    if (t.job) {
+      // the gate: the screen moves now, the flip is committed behind it. A refused
+      // flip (the box moved it first) puts the button back with the reason.
+      const pk = 'job|' + t.job; pendingKeys.add(pk);
+      const j = jobs.find(x => x.id === t.job), was = j && { state: j.state, note: j.note };
+      const tap = st.one_tap;
+      if (j) { j.state = t.to || 'running'; if (said) j.note = said; }
+      st.one_tap = [];                       // this decision is made; don't offer it twice
+      render(); toast('Sent to the agent.');
+      try { await flipJob(t.job, t.to || 'running', said ? { note: said } : {}); }
+      catch (e) { if (j) Object.assign(j, was); st.one_tap = tap; render(); toast(e.message); }
+      finally { pendingKeys.delete(pk); }
+      return;
+    }
+    const args = said ? Object.assign({}, t.args || {}, { input: said }) : (t.args || {});
+    const o = { project: key, skill: t.skill, args, label: t.label }, k = jobKey(o);
+    const job = newJob(o);
+    pendingKeys.add(k); jobs.unshift(job); local.push(job);
+    render(); toast('Sent. Watch it under Work.');
+    try { await runSkill(o, job); }
+    catch (e) {
+      jobs.splice(jobs.indexOf(job), 1); local.splice(local.indexOf(job), 1);
+      render(); toast(e.message);
+    } finally { pendingKeys.delete(k); }
   }
 }
 
