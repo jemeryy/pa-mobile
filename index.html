@@ -404,7 +404,7 @@
 </header>
 <main id="main"></main>
 <nav id="tabbar"></nav>
-<button id="agentfab" aria-label="Open the agent" onclick="openAgent()">&#9776;</button>
+<button id="agentfab" aria-label="Open the agent" onclick="openAgent()"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg></button>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -632,10 +632,6 @@ async function homeView() {
     <div class="greet">${greet}, Jeremy</div>
     <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
     <div id="alerts"></div>
-    <div class="rowlist" style="margin-bottom:16px">
-      <button onclick="openAgent('new')"><span class="ric">&#128172;</span>
-      <span class="rtx">Talk to Agent</span><span class="chev">${ICONS.chev}</span></button>
-    </div>
     <div id="todaycard"></div>
     <div id="dash">${skels(3)}</div>
     <div class="rowlist" style="margin-top:14px">
@@ -988,7 +984,6 @@ async function renderDashboard() {
       : '<div class="empty" style="padding:10px 4px">Nothing important unread.</div>') +
     `<div class="sect">Do things</div>
      <div class="btngrid">
-       <button class="bigbtn wide" onclick="openAgent('new')"><span class="em">&#128172;</span>Talk to Agent</button>
        ${(home.projects || []).map(p => `<a class="bigbtn" href="#/proj/${encodeURIComponent(p.key)}">
          <span class="em">${p.icon || '&#128194;'}</span>${esc(p.title)}
          ${p.badge ? `<span class="badge">${p.badge}</span>` : ''}</a>`).join('')}
