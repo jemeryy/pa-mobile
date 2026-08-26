@@ -2030,6 +2030,13 @@ async function renderTodayCard() {
   // just to see the day. Live Google is only the fallback when that file is missing.
   const agenda = DEMO ? null : await loadFile(AGENDA_PATH).then(f => JSON.parse(f.text)).catch(() => null);
   if (agenda) {
+    // older than 3 min: leave a note the box answers on its next pass (seconds),
+    // then show the fresh file. One write per open at most, and none when current.
+    if (Date.now() - Date.parse(agenda.updated) > 3 * 60 * 1000 && !window.__poked) {
+      window.__poked = true;
+      saveFile('mailbox/poke.txt', nowIso() + '\n', undefined, 'phone: refresh agenda').catch(() => {});
+      setTimeout(renderTodayCard, 20000);
+    }
     const evRows = evs => evs.length ? evs.map(ev =>
       `<div class="tev"><span class="tt">${esc(ev.time)}</span><span>${esc(ev.title)}</span></div>`).join('')
       : '<div class="tev muted">No events</div>';
