@@ -87,6 +87,7 @@
   .rowlist .rtx { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rowlist .chev { color: var(--muted); flex-shrink: 0; opacity: .6; }
   .rowlist .rtx.two { white-space: normal; line-height: 1.35; }
+  .rowlist .rsub { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
   .lrow { cursor: pointer; }
   .lrow .lbox { width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
     border: 2px solid var(--line); display: flex; align-items: center;
@@ -403,13 +404,26 @@
 </header>
 <main id="main"></main>
 <nav id="tabbar"></nav>
-<button id="agentfab" aria-label="Open the agent" onclick="openAgent()">&#128172;</button>
+<button id="agentfab" aria-label="Open the agent" onclick="openAgent()">&#9776;</button>
 <div class="toast" id="toast"></div>
 
 <script>
 'use strict';
 /* =============== utilities =============== */
 const $ = id => document.getElementById(id);
+/* What a job is called on screen. A chess build carries its student in
+   `project` (chess.yu-ern) and never in its label ("Build L26"), so on home and
+   on the parent Chess page there was no way to tell whose lesson it was. Mirrors
+   agent_loop.job_label. */
+function jobTitle(j, here) {
+  const label = (j && (j.label || j.skill)) || 'job';
+  const p = String((j && j.project) || '').split('.');
+  // on the student's own page the name is the header: prefixing every row with it
+  // is noise, so only pages ABOVE the job get the prefix
+  if (p[0] !== 'chess' || !p[1] || here === j.project) return label;
+  const student = p[1].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return label.toLowerCase().includes(student.toLowerCase()) ? label : student + ' ' + label;
+}
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
@@ -419,6 +433,7 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08A1.7 1.7 0 0 0 10.1 3.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08c.26.63.87 1.05 1.56 1.06H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.05z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  chats: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7m3 0v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
@@ -616,6 +631,7 @@ async function homeView() {
   $('main').innerHTML = `
     <div class="greet">${greet}, Jeremy</div>
     <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
+    <div id="alerts"></div>
     <div class="rowlist" style="margin-bottom:16px">
       <button onclick="openAgent('new')"><span class="ric">&#128172;</span>
       <span class="rtx">Talk to Agent</span><span class="chev">${ICONS.chev}</span></button>
@@ -666,6 +682,7 @@ async function vizListView() {
    Every project page is the same renderer over mailbox/state/<key>.json, so a
    new project is a new file, not new code. Contract: tools/pa_state.py. */
 const HOME_PATH = 'mailbox/home.json';
+const AGENDA_PATH = 'mailbox/agenda.json';     // today + tomorrow, written by the box
 const STATE_PATH = k => 'mailbox/state/' + k + '.json';
 const JOB_PATH = id => 'mailbox/jobs/' + id + '.json';
 /* mirrors TRANSITIONS in tools/agent_loop.py; test_agent_loop.py fails if they drift */
@@ -683,8 +700,7 @@ function nowIso() { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
 const DEMO_PROJECTS = [
   ['chess', 'Chess', '&#9822;'], ['investments', 'Investments', '&#128200;'],
   ['udemy', 'Udemy', '&#127916;'], ['uni', 'Uni', '&#127891;'],
-  ['fara', 'FARA', '&#129504;'], ['athena', 'Athena', '&#128506;'],
-  ['japanese', 'Japanese', '&#127471;&#127477;'], ['system', 'System', '&#128295;'],
+  ['fara', 'FARA', '&#129504;'], ['system', 'System', '&#128295;'],
 ];
 const DEMO_HOME = {
   attention: [
@@ -739,7 +755,7 @@ async function runSkill(o, job) {
   // list. `system` on purpose: a `user` line here would read as a question nobody
   // answered and the loop would eventually reply to it. Best effort, not awaited:
   // the job file is the run, and the box opens the thread itself if this misses.
-  saveFile(chatPath(id), JSON.stringify(chatMsg('system', (o.label || o.skill) + ' started')) + '\n',
+  saveFile(chatPath(id), JSON.stringify(chatMsg('system', jobTitle(job) + ' started')) + '\n',
            undefined, 'phone: open ' + o.skill + ' chat').catch(() => {});
   upsertHomeJob(job);       // so it survives a reload before the agent rewrites home
   return job;
@@ -886,7 +902,7 @@ function gateCards(list) {
   return list.map(j => {
     const g = j.gate || {};
     return `<div class="card flag">
-      <div class="ttl">${esc(j.label || j.skill)}</div>
+      <div class="ttl">${esc(jobTitle(j))}</div>
       <div class="det">${esc(g.question || j.note || 'Waiting for your check.')}</div>
       <div class="actrow" style="margin:10px 0 0">
         <a class="primary" style="flex:1;text-align:center"
@@ -906,7 +922,7 @@ async function gateView(id) {
   try { job = JSON.parse((await loadFile(JOB_PATH(id))).text); }
   catch (e) { $('main').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
   const g = job.gate || {};
-  setHeader(job.label || job.skill, { back: true });
+  setHeader(jobTitle(job), { back: true });
   if (job.state !== 'awaiting_check' || !g.question) {
     $('main').innerHTML = '<div class="empty">Already answered.</div>';
     return;
@@ -955,12 +971,20 @@ async function renderDashboard() {
   try { [home] = await Promise.all([loadHome(), checkBox()]); }
   catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
   if (!$('dash')) return;                              // navigated away while loading
-  const att = home.attention || [];
+  // Home stopped listing every needs_you item on 2026-08-26: only `urgent` ones
+  // (do it now) show, at the very top; the rest live on their project page.
+  const att = home.alerts || [];
+  const al = $('alerts');
+  if (al) al.innerHTML = att.length ? `<div class="sect">Do now</div>${attentionCards(att)}` : '';
+  const mails = home.emails || [];
   el.innerHTML =
-    (att.length ? `<div class="sect" style="display:flex;align-items:baseline;justify-content:space-between">
-        <span>Needs your attention</span>
-        <button id="attclear" class="muted" style="background:none;border:0;padding:0;font-size:13px">Clear all</button>
-      </div>${attentionCards(att)}` : '') +
+    `<div class="sect">School email worth reading</div>` +
+    (mails.length ? `<div class="rowlist">${mails.map(m =>
+      `<a href="#/proj/${encodeURIComponent(m.project || 'uni')}">
+        <span class="ric">&#9993;&#65039;</span>
+        <span class="rtx">${esc(m.subject)}<span class="rsub">${esc(m.from)}${m.why ? ' · ' + esc(m.why) : ''}</span></span>
+        <span class="chev">${ICONS.chev}</span></a>`).join('')}</div>`
+      : '<div class="empty" style="padding:10px 4px">Nothing important unread.</div>') +
     `<div class="sect">Do things</div>
      <div class="btngrid">
        <button class="bigbtn wide" onclick="openAgent('new')"><span class="em">&#128172;</span>Talk to Agent</button>
@@ -973,20 +997,13 @@ async function renderDashboard() {
     (!home.busy ? ''
       : boxQuiet ? '<p class="err" style="margin:10px 4px 0">The agent box stopped responding. Whatever it was running has died.</p>'
                  : '<p class="muted" style="margin:10px 4px 0">The agent is working on something.</p>');
-  el.querySelectorAll('[data-att]').forEach(b => {
+  (al || el).querySelectorAll('[data-att]').forEach(b => {
     b.onclick = async e => {
       e.preventDefault(); b.disabled = true;
       try { await clearAttention(att[+b.dataset.att]); b.closest('.card').remove(); }
       catch (err) { toast(err.message); b.disabled = false; }
     };
   });
-  if ($('attclear')) $('attclear').onclick = async () => {
-    if (!confirm(`Clear all ${att.length}?`)) return;
-    // one at a time: they write the same home.json, and a parallel run would have
-    // every one of them racing on the same stale sha
-    for (const a of att) { try { await clearAttention(a); } catch (e) { /* keep going */ } }
-    renderDashboard();
-  };
 }
 const DEMO_STATE = {
   chess: { project: 'chess', title: 'Chess', icon: '&#9822;',
@@ -1012,14 +1029,6 @@ const DEMO_STATE = {
   fara: { project: 'fara', title: 'FARA', icon: '&#129504;',
     numbers: [{ label: 'New users', value: '3', sub: 'this week' }, { label: 'Queries per user', value: '4.2', sub: '7-day average' },
               { label: 'Cost this month', value: 'US$18', sub: 'API + hosting' }, { label: 'Active users', value: '11', sub: 'last 30 days' }] },
-  athena: { project: 'athena', title: 'Athena', icon: '&#128506;',
-    needs_you: [{ title: 'Your tray has 8 new items', detail: 'The agent fills the tray. You do the organising.', tone: 'dim' }],
-    one_tap: [{ label: 'Quiz me', skill: 'athena-quiz' }],
-    rest: [{ label: 'Statistics map', href: '#/map/statistics' }] },
-  japanese: { project: 'japanese', title: 'Japanese', icon: '&#127471;&#127477;',
-    one_tap: [{ label: 'Practice now', skill: 'japanese-practice' },
-              { label: '🎤 Talk practice', href: '#/chat', style: 'ghost' }],
-    rest: [{ label: 'Progress', href: '#/p/japanese/README.md' }] },
   system: { project: 'system', title: 'System', icon: '&#128295;',
     numbers: [{ label: 'Automations healthy', value: '7/8' }, { label: 'Jobs today', value: '5' }],
     needs_you: [{ title: 'Daily digest skipped twice', detail: 'No US trading day. Working as designed.', tone: 'dim' }],
@@ -1087,6 +1096,9 @@ async function projView(key) {
 
   function render() {
     const parts = [];
+    if ((st.courses || []).length)
+      parts.push(`<div class="sect">Courses</div><div class="rowlist">${st.courses.map(c =>
+        `<a href="${esc(c.href)}"><span class="rtx two">${esc(c.label)}<br><span class="muted" style="font-size:13px">${esc(c.sub || '')}</span></span><span class="chev">${ICONS.chev}</span></a>`).join('')}</div>`);
     if ((st.numbers || []).length)
       parts.push(`<div class="numgrid">${st.numbers.map(n => `<div class="num">
         <div class="v">${esc(n.value)}</div><div class="l">${esc(n.label)}</div>
@@ -1141,7 +1153,7 @@ async function projView(key) {
     // each row opens that build's chat: the gate it asked, what you said, the result
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map((j, i) =>
-        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(j.label || j.skill)}</span>${
+        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(jobTitle(j, key))}</span>${
           LIVE.includes(j.state)      // anything not finished can be killed, gate included
             ? `<button class="ghost" data-jstop="${i}" style="padding:5px 10px;font-size:13px;margin-right:8px">Stop</button>`
             : ''}${jobChip(j.state)}</div>`).join('')}</div>`);
@@ -1179,7 +1191,7 @@ async function projView(key) {
     $('main').querySelectorAll('[data-jstop]').forEach(b => { b.onclick = async ev => {
       ev.stopPropagation();                        // the row itself opens the chat
       const j = jobs[+b.dataset.jstop]; if (!j) return;
-      if (!confirm('Stop ' + (j.label || j.skill) + '? It will not finish.')) return;
+      if (!confirm('Stop ' + jobTitle(j, key) + '? It will not finish.')) return;
       b.disabled = true;
       try {
         const f = await loadFile(JOB_PATH(j.id));
@@ -1566,9 +1578,9 @@ function agentShell() {
   el.id = 'agent';
   el.innerHTML = `
     <div class="ahd">
-      <button class="iconbtn" id="aclose" aria-label="Collapse">${ICONS.chev}</button>
+      <button class="iconbtn" id="aclose" aria-label="Close chat">${ICONS.menu}</button>
       <div class="atitle" id="atitle">Agent</div>
-      <button class="iconbtn" id="alist" aria-label="Past chats">${ICONS.menu}</button>
+      <button class="iconbtn" id="alist" aria-label="All chats">${ICONS.chats}</button>
       <button class="iconbtn" id="anew" aria-label="New chat">${ICONS.plus}</button>
       <button class="iconbtn" id="aspeak" aria-label="Read replies aloud">${speakOn ? '🔊' : '🔇'}</button>
     </div>
@@ -1848,7 +1860,7 @@ async function deleteChat(thread, sha) {
 let chatSel = null;                        // Set of picked threads, null = not selecting
 async function showChats() {
   const body = $('abody'); if (!body) return;
-  const heading = sel => `<div class="sect" style="margin:2px 4px 8px;display:flex;align-items:baseline;justify-content:space-between">
+  const heading = sel => `<div class="sect" style="position:sticky;top:-12px;z-index:3;background:var(--bg);margin:-12px 0 8px;padding:12px 4px 8px;display:flex;align-items:baseline;justify-content:space-between">
       <span>Past chats</span>
       <button id="chatsel" class="muted" style="background:none;border:0;padding:0;font-size:13px">${sel ? 'Cancel' : 'Select'}</button>
     </div>`;
@@ -1870,7 +1882,7 @@ async function showChats() {
                 style="flex-shrink:0;margin-left:8px;padding:2px 8px;font-size:16px">&#128465;</span>`}
         </button>`).join('') + '</div>'
       : '<div class="empty">No chats yet.</div>')
-      + (sel ? `<div class="actrow" style="margin:12px 4px 0">
+      + (sel ? `<div class="actrow" style="position:sticky;bottom:-12px;z-index:3;background:var(--bg);margin:12px 0 -12px;padding:12px 4px">
           <button class="ghost" id="chatall">${sel.size === metas.length ? 'None' : 'All'}</button>
           <button class="primary" id="chatdel"${sel.size ? '' : ' disabled'}>Delete ${sel.size || ''}</button>
         </div>` : '');
@@ -2012,13 +2024,28 @@ async function renderTodayCard() {
       <button class="ghost" onclick="location.hash='#/settings'">Set up in Settings</button></div>`;
     return;
   }
+  el.innerHTML = `<div class="card today">${skels(2)}</div>`;
+  // The box writes mailbox/agenda.json every 5 minutes with its own long-lived
+  // Google token (tools/pa_agenda.py), so the phone never has to reconnect Google
+  // just to see the day. Live Google is only the fallback when that file is missing.
+  const agenda = DEMO ? null : await loadFile(AGENDA_PATH).then(f => JSON.parse(f.text)).catch(() => null);
+  if (agenda) {
+    const evRows = evs => evs.length ? evs.map(ev =>
+      `<div class="tev"><span class="tt">${esc(ev.time)}</span><span>${esc(ev.title)}</span></div>`).join('')
+      : '<div class="tev muted">No events</div>';
+    let html = (agenda.days || []).map((d, i) =>
+      `<div class="thead"${i ? ' style="margin-top:10px"' : ''}>${ICONS.cal} ${esc(d.label)}</div>${evRows(d.events || [])}`).join('');
+    const due = agenda.tasks_due || [];
+    if (due.length) html += `<div class="tasksum"><a href="#/tasks"><b>${due.length}</b> task${due.length > 1 ? 's' : ''} due</a></div>`;
+    el.innerHTML = `<div class="card today" onclick="if(event.target.tagName!=='A')location.hash='#/cal'">${html}</div>`;
+    return;
+  }
   if (!gtokValid()) {
     el.innerHTML = `<div class="card connect">
       <p>Google connection expired.</p>
       <button class="primary" onclick="gAuth(renderTodayCard)">Reconnect Google</button></div>`;
     return;
   }
-  el.innerHTML = `<div class="card today">${skels(2)}</div>`;
   try {
     const t0 = new Date(); t0.setHours(0,0,0,0);
     const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
@@ -2047,8 +2074,7 @@ function dirView(path, entries) {
   setHeader(path.split('/').pop() || path, { back: true });
   const visible = entries.filter(e =>
     !e.name.startsWith('.') && !e.name.startsWith('_') &&
-    !/\.(bak|tmp)$/.test(e.name) && !/\.recovered-/.test(e.name) &&
-    (e.type === 'dir' || e.name.endsWith('.md')));
+    !/\.(bak|tmp)$/.test(e.name) && !/\.recovered-/.test(e.name));
   visible.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
   $('main').innerHTML = visible.length
     ? '<div class="rowlist">' + visible.map(e =>
@@ -2106,9 +2132,32 @@ function liParts(src) {
 async function openPage(path) {
   const j = await ghGet(path);
   if (Array.isArray(j)) return dirView(path, j);
+  if (BIN_RE.test(path)) return fileView(path);
   cur = { path, sha: j.sha, text: b64decode(j.content) };
   if (!path.endsWith('.md')) return rawView(path, true);
   docView(path);
+}
+/* A pdf, picture, deck or sheet never goes through GitHub's web pages (that would
+   need a GitHub login on whatever device he is on): the app pulls the raw bytes
+   with its own token. pdf and pictures show inline; a deck or sheet gets an
+   Open button, which the phone's own viewer handles. */
+const BIN_RE = /\.(pdf|png|jpe?g|gif|webp|pptx?|xlsx?|docx?)$/i;
+async function fileView(path) {
+  const name = path.split('/').pop();
+  setHeader(name, { back: true });
+  $('main').innerHTML = skels(2);
+  const r = await gh(path, { headers: { 'Accept': 'application/vnd.github.raw+json' } });
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  if (location.hash !== '#/p/' + encodeURIComponent(path) && decodeURIComponent(location.hash) !== '#/p/' + path) return;
+  if (/\.pdf$/i.test(name))
+    $('main').innerHTML = `<iframe src="${url}" style="width:100%;height:78vh;border:0;border-radius:12px;background:#fff"></iframe>
+      <p style="margin-top:10px"><a class="ghost" href="${url}" target="_blank" rel="noopener" style="display:inline-block;padding:8px 14px">Open full screen</a></p>`;
+  else if (/\.(png|jpe?g|gif|webp)$/i.test(name))
+    $('main').innerHTML = `<img src="${url}" style="max-width:100%;border-radius:12px">`;
+  else
+    $('main').innerHTML = `<div class="empty">${esc(name)} (${Math.round(blob.size / 1e3)} KB)</div>
+      <p><a class="primary" href="${url}" download="${esc(name)}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px">Open</a></p>`;
 }
 function docView(path) {
   const actions = [{ label: 'Raw', fn: () => location.hash = '#/raw/' + encodeURIComponent(cur.path) }];
