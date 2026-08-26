@@ -982,7 +982,8 @@ async function renderDashboard() {
     (mails.length ? `<div class="rowlist">${mails.map(m =>
       `<a href="#/proj/${encodeURIComponent(m.project || 'uni')}">
         <span class="ric">&#9993;&#65039;</span>
-        <span class="rtx">${esc(m.subject)}<span class="rsub">${esc(m.from)}${m.why ? ' · ' + esc(m.why) : ''}</span></span>
+        <span class="rtx two">${esc(m.subject)}<span class="rsub">${esc(m.from)}${m.why ? ' · ' + esc(m.why) : ''}</span>${
+          m.summary ? `<span class="rsub" style="color:var(--ink);opacity:.85">${esc(m.summary)}</span>` : ''}</span>
         <span class="chev">${ICONS.chev}</span></a>`).join('')}</div>`
       : '<div class="empty" style="padding:10px 4px">Nothing important unread.</div>') +
     `<div class="sect">Do things</div>
