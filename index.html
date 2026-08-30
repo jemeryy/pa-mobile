@@ -191,37 +191,15 @@
   .addblock svg { width: 18px; height: 18px; }
 
   /* ---------- udemy script view ---------- */
-  .u-tot { position: sticky; top: 53px; z-index: 20; background: var(--bg);
-    padding: 8px 4px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line);
-    font-variant-numeric: tabular-nums; display: flex; gap: 6px; align-items: center; }
-  .u-tot b { color: var(--ink); }
-  .u-blk { display: grid; grid-template-columns: 1fr minmax(190px, 290px);
-    gap: 0 18px; align-items: start; padding: 3px 0; }
-  /* narrow: the note goes above the block it belongs to, as it is in the file */
-  @media (max-width: 780px) { .u-blk { grid-template-columns: 1fr; }
-    .u-blk .u-side { order: -1; } .u-blk .u-note { margin: 4px 0 2px; }
-    .u-addnote { padding: 2px 0 0; } }
+  /* Just the script: a section title, a title per video, and the video's script
+     as one continuous block of text. No notes, labels, counts, or timings. */
+  .u-blk { padding: 2px 0; }
   .u-blk textarea { font-size: 15.5px; border: none; background: none;
     padding: 6px 0; border-left: 2px solid transparent; }
   .u-blk textarea:focus, .u-blk textarea:focus-visible { outline: none;
     border-left-color: var(--accent); padding-left: 10px; }
-  .u-blk.head textarea { font-size: 17px; font-weight: 700; padding-top: 18px; }
-  .u-blk .u-stats { font-size: 11.5px; color: var(--muted);
-    font-variant-numeric: tabular-nums; }
-  .u-blk hr { border: none; border-top: 1px solid var(--line); margin: 18px 0; }
-  .u-note { background: var(--surface2); border-radius: 8px; padding: 8px 10px;
-    margin-top: 8px; display: flex; gap: 6px; align-items: flex-start; }
-  .u-note textarea { font-size: 13px; line-height: 1.5; color: var(--muted);
-    padding: 0; border-left: none; }
-  .u-note textarea:focus { padding-left: 0; color: var(--ink); }
-  .u-note .x { background: none; border: none; color: var(--muted); font-size: 16px;
-    line-height: 1; padding: 0 2px; flex-shrink: 0; }
-  .u-tag { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
-    font-weight: 700; color: var(--muted); opacity: .6; padding-top: 10px; }
-  .u-tag.narr { color: var(--accent); opacity: 1; }
-  .u-addnote { background: none; border: none; color: var(--muted); font-size: 12.5px;
-    padding: 8px 0; opacity: .55; }
-  .u-blk:hover .u-addnote, .u-addnote:focus { opacity: 1; }
+  .u-blk.head textarea { font-size: 17px; font-weight: 700; padding-top: 22px; }
+  .u-blk.sect textarea { font-size: 20px; font-weight: 700; padding-bottom: 2px; }
   .savebar { position: fixed; left: 0; right: 0; z-index: 40;
     bottom: calc(52px + env(safe-area-inset-bottom));
     background: var(--bg); border-top: 1px solid var(--line);
@@ -2512,54 +2490,50 @@ async function rawSave() {
 }
 
 /* =============== Udemy script view ===============
-   One continuous script: headings + narration paragraphs, each with an optional
-   on-screen note beside it (`note:` lines in the file, directly above the block
-   they annotate). Slide/animation markers are legacy: absorbed on read (visual:
-   and action: become notes; [SLIDE]/[DEMO]/anim:/resource: are dropped) and never
-   written back. */
-const WPM = 145;
-const NOTE_RE = /^(note|visual|action):\s?/;
-const DROP_RE = /^(anim|resource):|^\[(SLIDE|DEMO)\b/;
-const HEAD_RE = /^#{1,6} /, HR_RE = /^---+\s*$/;
+   A script file is three things and nothing else: a `# Section N: Title` line, a
+   `## Video M: Title` line per video, and that video's script under it as one
+   continuous piece of text. Jeremy drafts here like a plain text editor, so the
+   view shows no on-screen notes, no side labels, no word counts and no timings.
+   Legacy annotation lines (note:/visual:/action:/anim:/resource:, [SLIDE]/[DEMO]
+   markers, horizontal rules) are dropped on read and never written back. */
+const DROP_LINE_RE = /^(note|visual|action|anim|resource):|^\[(SLIDE|DEMO)\b|^---+\s*$/;
+const SECT_RE = /^# +/, VID_RE = /^#{2,6} +/;
+/* -> { section, pre, videos:[{title, body}] }. `pre` is any stray text sitting
+   above the first video title; it is kept so nothing is ever silently lost. */
 function uParse(text) {
-  const blocks = [];
-  let notes = [], para = [];
-  const push = (kind, t) => { blocks.push({ kind, text: t, note: notes.join('\n') }); notes = []; };
-  const flush = () => { if (para.length) { push('p', para.join('\n')); para = []; } };
+  const doc = { section: '', pre: '', videos: [] };
+  let bucket = null;                       // null = still before the first video
+  const lines = [];
   for (const raw of text.split('\n')) {
     const line = raw.replace(/\s+$/, '');
-    if (NOTE_RE.test(line)) { notes.push(line.replace(NOTE_RE, '')); continue; }
-    if (DROP_RE.test(line)) continue;
-    if (!line.trim()) { flush(); continue; }
-    if (HEAD_RE.test(line)) { flush(); push('h', line); continue; }
-    if (HR_RE.test(line)) { flush(); push('hr', '---'); continue; }
-    para.push(line);
+    if (DROP_LINE_RE.test(line)) continue;
+    lines.push(line);
   }
-  flush();
-  if (notes.length) push('p', '');          // a note with nothing after it
-  return blocks;
+  for (const line of lines) {
+    if (SECT_RE.test(line) && !doc.section && !doc.videos.length) {
+      doc.section = line.replace(SECT_RE, ''); continue;
+    }
+    if (VID_RE.test(line)) {
+      bucket = { title: line.replace(VID_RE, ''), body: [] };
+      doc.videos.push(bucket); continue;
+    }
+    (bucket ? bucket.body : (doc.preLines = doc.preLines || [])).push(line);
+  }
+  const tidy = ls => (ls || []).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  doc.pre = tidy(doc.preLines); delete doc.preLines;
+  doc.videos.forEach(v => { v.body = tidy(v.body); });
+  return doc;
 }
-function uSerialize(blocks) {
-  const out = [];
-  for (const b of blocks) {
-    const note = (b.note || '').trim(), text = (b.text || '').replace(/\s+$/, '');
-    if (!note && !text.trim()) continue;
-    if (note) out.push(...note.split('\n').map(l => 'note: ' + l.trim()));
-    if (text.trim()) out.push(...text.split('\n'));
-    out.push('');
+function uSerialize(doc) {
+  const parts = [];
+  if (doc.section.trim()) parts.push('# ' + doc.section.trim());
+  if (doc.pre.trim()) parts.push(doc.pre.trim());
+  for (const v of doc.videos) {
+    if (!v.title.trim() && !v.body.trim()) continue;
+    parts.push('## ' + v.title.trim());
+    if (v.body.trim()) parts.push(v.body.trim());
   }
-  return out.join('\n');
-}
-function narrWords(t) { t = t.trim(); return t ? t.split(/\s+/).length : 0; }
-function fmtDur(w) { const s = Math.round(w / WPM * 60); return Math.floor(s / 60) + ':' + pad(s % 60); }
-/* Narration = paragraphs after the first lecture heading, minus the metadata
-   lines (Status:/Target:/Format:) that top-and-tail a script file. */
-function uMarkNarr(blocks) {
-  let started = false;
-  for (const b of blocks) {
-    if (b.kind === 'h') { started = true; b.narr = false; continue; }
-    b.narr = started && b.kind === 'p' && !/^(status|target|format)\b/i.test(b.text.trim());
-  }
+  return parts.join('\n\n') + '\n';
 }
 async function udemyView(path) {
   if (cur.path !== path) cur = await loadFile(path);
@@ -2568,12 +2542,11 @@ async function udemyView(path) {
     if (!uGuard()) return;
     leaveGuard = null; location.hash = '#/raw/' + encodeURIComponent(path);
   } }] });
-  let blocks = uParse(cur.text);
+  let doc = uParse(cur.text);
   let dirty = false;
   const draftKey = 'pa_draft_' + path;
   $('main').innerHTML = `
     <div id="ubanner"></div>
-    <div class="u-tot" id="utot"></div>
     <div id="usegs"></div>
     <div class="savebar" id="usave" style="display:none">
       <span class="msg">Unsaved changes</span>
@@ -2585,73 +2558,34 @@ async function udemyView(path) {
     $('ubanner').innerHTML = `<div class="banner">A draft from an earlier failed save exists on this device.
       <div class="brow"><button class="primary" id="drRestore">Restore draft</button>
       <button class="ghost" id="drDiscard">Discard it</button></div></div>`;
-    $('drRestore').onclick = () => { blocks = uParse(draft); localStorage.removeItem(draftKey); build(); markDirty(); $('ubanner').innerHTML = ''; };
+    $('drRestore').onclick = () => { doc = uParse(draft); localStorage.removeItem(draftKey); build(); markDirty(); $('ubanner').innerHTML = ''; };
     $('drDiscard').onclick = () => { localStorage.removeItem(draftKey); $('ubanner').innerHTML = ''; };
   }
   function uGuard() { return !dirty || confirm('You have unsaved script edits. Leave and lose them?'); }
   leaveGuard = { check: uGuard, dirty: () => dirty, hash: '#/p/' + encodeURIComponent(path) };
   function markDirty() { dirty = true; $('usave').style.display = ''; }
-  function totals() {
-    uMarkNarr(blocks);
-    let w = 0; blocks.forEach(b => { if (b.narr) w += narrWords(b.text); });
-    $('utot').innerHTML = `<b>${w}</b>&nbsp;narration words &middot; ~<b>${fmtDur(w)}</b>&nbsp;at ${WPM} wpm`;
-  }
   function fit(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
+  function field(cls, value, placeholder, onInput) {
+    const row = document.createElement('div'); row.className = 'u-blk' + (cls ? ' ' + cls : '');
+    const ta = document.createElement('textarea');
+    ta.value = value; ta.placeholder = placeholder;
+    ta.addEventListener('input', () => { onInput(ta.value); markDirty(); fit(ta); });
+    row.appendChild(ta);
+    $('usegs').appendChild(row);
+    requestAnimationFrame(() => fit(ta));
+    return ta;
+  }
   function build() {
-    uMarkNarr(blocks);
-    const root = $('usegs'); root.innerHTML = '';
-    blocks.forEach(b => {
-      const row = document.createElement('div');
-      row.className = 'u-blk' + (b.kind === 'h' ? ' head' : '');
-      row.innerHTML = '<div class="u-body"></div><div class="u-side"></div>';
-      const body = row.querySelector('.u-body'), side = row.querySelector('.u-side');
-      if (b.kind === 'hr') body.innerHTML = '<hr>';
-      else {
-        // headings keep their markdown hashes in the file, never on screen
-        const pre = b.kind === 'h' ? (b.text.match(/^#{1,6} /) || ['## '])[0] : '';
-        const ta = document.createElement('textarea'); ta.value = b.text.slice(pre.length);
-        ta.placeholder = b.kind === 'h' ? 'Heading' : 'Narration';
-        if (pre === '# ') ta.style.fontSize = '20px';
-        const stats = document.createElement('div'); stats.className = 'u-stats';
-        const restat = () => { stats.textContent = b.narr ? narrWords(b.text) + ' words · ~' + fmtDur(narrWords(b.text)) : ''; };
-        ta.addEventListener('input', () => { b.text = pre + ta.value; markDirty(); fit(ta); restat(); totals(); });
-        body.appendChild(ta); body.appendChild(stats);
-        requestAnimationFrame(() => fit(ta));
-        restat();
-      }
-      const drawSide = () => {
-        side.innerHTML = '';
-        if (b.kind === 'hr') return;
-        // say plainly what each block is: only "narration" gets read aloud
-        const tag = document.createElement('div');
-        tag.className = 'u-tag' + (b.narr ? ' narr' : '');
-        tag.textContent = b.kind === 'h' ? 'title' : b.narr ? 'narration' : 'not spoken';
-        side.appendChild(tag);
-        if (b.note == null || b.note === '') {
-          const add = document.createElement('button'); add.className = 'u-addnote';
-          add.textContent = '+ on-screen note';
-          add.onclick = () => { b.note = ' '; markDirty(); drawSide(); side.querySelector('textarea').focus(); };
-          side.appendChild(add);
-          return;
-        }
-        const wrap = document.createElement('div'); wrap.className = 'u-note';
-        const nta = document.createElement('textarea'); nta.value = b.note.trim();
-        nta.placeholder = 'What is on screen here';
-        nta.addEventListener('input', () => { b.note = nta.value; markDirty(); fit(nta); });
-        const x = document.createElement('button'); x.className = 'x'; x.title = 'Delete note';
-        x.innerHTML = '&times;';
-        x.onclick = () => { if (!nta.value.trim() || confirm('Delete this note?')) { b.note = ''; markDirty(); drawSide(); } };
-        wrap.appendChild(nta); wrap.appendChild(x); side.appendChild(wrap);
-        requestAnimationFrame(() => fit(nta));
-      };
-      drawSide();
-      root.appendChild(row);
+    $('usegs').innerHTML = '';
+    field('sect', doc.section, 'Section title', v => doc.section = v);
+    if (doc.pre.trim()) field('', doc.pre, '', v => doc.pre = v);
+    doc.videos.forEach(v => {
+      field('head', v.title, 'Video title', x => v.title = x);
+      field('', v.body, 'Script', x => v.body = x);
     });
-    totals();
   }
   $('usavebtn').onclick = async () => {
-    let text = uSerialize(blocks);
-    if (!text.endsWith('\n')) text += '\n';
+    const text = uSerialize(doc);
     $('usavebtn').disabled = true;
     try {
       const sha = await saveFile(cur.path, text, cur.sha, 'phone: edit script ' + name);
@@ -2661,7 +2595,7 @@ async function udemyView(path) {
         $('ubanner').innerHTML = `<div class="banner">The file changed elsewhere (probably Claude edited it), so your version was
           kept as a draft on this device instead of overwriting. Reloaded the latest file.
           <div class="brow"><button class="primary" onclick="location.reload()">OK</button></div></div>`;
-        blocks = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+        doc = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
         window.scrollTo(0, 0);
         return;
       }
@@ -2672,7 +2606,7 @@ async function udemyView(path) {
   };
   $('udiscard').onclick = () => {
     if (!confirm('Discard your edits and reload?')) return;
-    blocks = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
+    doc = uParse(cur.text); dirty = false; $('usave').style.display = 'none'; build();
   };
   build();
 }
@@ -3152,7 +3086,7 @@ if (DEMO) {
       { title: 'Plans', path: 'plans', icon: '\u{1F5FA}' },
     ]),
     'context/current-priorities.md': '# Current priorities\n\n*Last updated: 2026-07-11*\n\n1. **SMU on-ramp** - matriculation admin, camps, Term 1 launch.\n2. **FARA** - make fara.sg profitable.\n\n## This week\n\n- [x] Matriculation forms\n- [ ] Book Bondue camp slot\n- [ ] FA weekly sweep review\n\nSome closing paragraph with a [link](../uni/roadmap.md) and `code`.\n',
-    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview\n\nStatus: DRAFT v5.\n\n---\n\n## LECTURE 0.1 - Welcome (3-4 min)\n\nTarget: 3-4 min.\n\nnote: Course title on a dark canvas, three doodles under it.\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\nnote: Screen recording: messy handwritten notes, then the clean output.\n\nWatch what I do here, because every technique gets its own lesson later.\n',
+    'projects/udemy-course/scripts/section-00.md': '# Section 0: Overview and Introduction\n\n## Video 1: Welcome and course overview\n\nWelcome to Practical AI Skills for Working Professionals. This course is about using AI properly at work.\n\nWatch what I do here, because every technique gets its own lesson later.\n\n## Video 2: Your first win in 10 minutes\n\nBefore any lessons, I want to show you what this course makes possible, in one small demo.\n',
   };
   loadFile = async path => ({ path, sha: 'demo',
     text: files[path] || '# ' + path.split('/').pop().replace(/\.md$/, '') + '\n\nDemo file.\n\n- [ ] item one\n- [x] item two\n' });
