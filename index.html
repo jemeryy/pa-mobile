@@ -1246,10 +1246,16 @@ async function projView(key) {
     const kept = st.needs_you || [];
     const gone = it.taught ? kept.filter(n => (n.actions || []).some(a => a.tick === it.n)) : [];
     if (gone.length) st.needs_you = kept.filter(n => !gone.includes(n));
+    // Same for a build of this lesson parked at its review gate: a taught lesson
+    // has passed review, so answer the gate's first (approve) option for him.
+    const gate = it.taught ? jobs.find(j => j.state === 'awaiting_check' && j.gate &&
+      j.skill === 'build-chess-lesson' && +((j.args || {}).lesson) === +it.n) : null;
     render();                                  // optimistic: the tap feels instant
     toast(it.taught ? `Lesson ${it.n} ticked` : `Lesson ${it.n} unticked`);
     try {
-      await Promise.all([persistLessons(), ...gone.map(g => clearHomeAttention(g.title))]);
+      const o = gate && (gate.gate.options || [])[0];
+      await Promise.all([persistLessons(), ...gone.map(g => clearHomeAttention(g.title)),
+        ...(gate ? [flipJob(gate.id, 'running', { note: (o && o.label) || o || 'Approve' })] : [])]);
     } catch (e) {
       it.taught = !it.taught; st.one_tap = lessonButton(); st.needs_you = kept;
       toast(e.message); render();
