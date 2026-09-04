@@ -348,7 +348,7 @@
   body.agent-open #agentfab { display: none; }
   body:has(.savebar) #agentfab { display: none; }   /* never sit on top of Save */
   #agent { position: fixed; top: 0; bottom: 0; right: 0; z-index: 45;
-    width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line);
+    width: var(--agentw, min(94vw, 420px)); background: var(--bg); border-left: 1px solid var(--line);
     display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,.16);
     transform: translateX(101%); transition: transform .22s ease-out; }
   body.agent-open #agent { transform: translateX(0); }
@@ -362,11 +362,17 @@
   #agent .afoot { flex-shrink: 0; display: flex; gap: 8px; align-items: flex-end;
     border-top: 1px solid var(--line); padding: 8px 10px;
     padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
-  #agent .afoot textarea { flex: 1; max-height: 110px; border-radius: 18px; padding: 9px 14px; }
+  #agent .afoot textarea { flex: 1; max-height: 50vh; border-radius: 18px; padding: 9px 14px; }
   #agent .afoot .primary, #agent .afoot .ghost { border-radius: 18px; padding: 9px 14px; flex-shrink: 0; }
   /* which page the next message will carry as context */
   .pgctx { font-size: 12px; color: var(--muted); padding: 0 4px 8px; }
-  @media (min-width: 900px) { body.agent-open main { margin-right: min(94vw, 420px); } }
+  @media (min-width: 900px) { body.agent-open main { margin-right: var(--agentw, min(94vw, 420px)); } }
+  /* drag the panel wider or narrower on desktop; touch has no room to spare */
+  #agentgrip { display: none; }
+  @media (min-width: 900px) {
+    #agentgrip { display: block; position: absolute; left: -3px; top: 0; bottom: 0;
+      width: 7px; cursor: ew-resize; touch-action: none; }
+  }
 
   /* ---------- concept map (Aegis, embedded) ---------- */
   .mapview { position: fixed; top: 53px; left: 0; right: 0;
@@ -1184,7 +1190,16 @@ async function projView(key) {
         }
       } catch (e) { toast(e.message); b.disabled = false; }
     }; });
-    $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = () => toggleLesson(+b.dataset.les, b); });
+    // Only the tickbox ticks. Anywhere else on the row opens the chat that built
+    // (and revised) that lesson, which is where he asks for a change.
+    $('main').querySelectorAll('[data-les]').forEach(b => { b.onclick = ev => {
+      if (ev.target.closest('.lbox')) return toggleLesson(+b.dataset.les, b);
+      const it = st.lessons.items[+b.dataset.les];
+      const live = jobs.find(j => j.label === 'Build L' + it.n);
+      const thread = (live && live.id) || it.thread;
+      if (thread) openAgent(thread);
+      else toast('No build chat for lesson ' + it.n + ' yet.');
+    }; });
     $('main').querySelectorAll('[data-build]').forEach(b => { b.onclick = () => {
       const it = st.lessons.items[+b.dataset.build];
       fire({ skill: 'build-chess-lesson', label: 'Build L' + it.n,
@@ -1557,6 +1572,7 @@ function agentShell() {
   el = document.createElement('div');
   el.id = 'agent';
   el.innerHTML = `
+    <div id="agentgrip"></div>
     <div class="ahd">
       <button class="iconbtn" id="aclose" aria-label="Close chat">${ICONS.menu}</button>
       <div class="atitle" id="atitle">Agent</div>
@@ -1575,6 +1591,7 @@ function agentShell() {
     </div>`;
   document.body.appendChild(el);
   $('aclose').onclick = closeAgent;
+  agGrip($('agentgrip'));
   $('alist').onclick = showChats;
   $('anew').onclick = () => openThread(newThread());
   $('aspeak').onclick = () => {
@@ -1584,7 +1601,7 @@ function agentShell() {
   };
   $('chatsend').onclick = agSend;
   const ta = $('chatin');
-  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 110) + 'px'; };
+  ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight / 2) + 'px'; };
   // Enter sends. Two paths on purpose: a hardware keyboard fires keydown, but a
   // phone's on-screen keyboard often reports keydown as key 229 / Unidentified and
   // only shows its intent as a beforeinput insertLineBreak. Catch both.
@@ -1786,6 +1803,25 @@ async function agPoll() {
     agRender();
     if (reply) speak(reply.text);
   } catch (e) { /* 404 (no thread yet) or transient: ignore */ }
+}
+/* Desktop only: drag the panel's left edge. The width lives in --agentw so both
+   the panel and main's margin follow it, and it sticks per browser. */
+const AGW_MIN = 320;
+function agGrip(grip) {
+  const saved = +localStorage.getItem('pa_agentw');
+  if (saved) document.documentElement.style.setProperty('--agentw', saved + 'px');
+  grip.onpointerdown = e => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId);
+    grip.onpointermove = ev => {
+      const w = Math.max(AGW_MIN, Math.min(innerWidth - 120, innerWidth - ev.clientX));
+      document.documentElement.style.setProperty('--agentw', w + 'px');
+    };
+    grip.onpointerup = grip.onpointercancel = () => {
+      grip.onpointermove = grip.onpointerup = grip.onpointercancel = null;
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--agentw'));
+      if (w) localStorage.setItem('pa_agentw', w);
+    };
+  };
 }
 async function agSend() {
   const ta = $('chatin'); const body = ta.value.trim();
