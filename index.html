@@ -374,6 +374,14 @@
   #agent .achips .chip em { color: var(--muted); font-style: normal; flex-shrink: 0; }
   #agent .achips .chip button { border: 0; background: none; color: var(--muted); cursor: pointer;
     font-size: 15px; line-height: 1; padding: 0 4px; }
+  #agent .achips .chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px;
+    margin: -2px 0 -2px -4px; cursor: pointer; }
+  #agent .bubble .achips { padding: 6px 0 0; }
+  #agent .bubble .achips .chip { background: rgba(127,127,127,.18); border-color: transparent; }
+  /* tap a picture chip to see it full size */
+  .zoom { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.88);
+    display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .zoom img { max-width: 100%; max-height: 100%; border-radius: 8px; }
   /* which page the next message will carry as context */
   .pgctx { font-size: 12px; color: var(--muted); padding: 0 4px 8px; }
   @media (min-width: 900px) { body.agent-open main { margin-right: var(--agentw, min(94vw, 420px)); } }
@@ -1667,12 +1675,24 @@ let agFiles = [];
 const fileSize = b => b < 1e6 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1e6).toFixed(1) + ' MB';
 function agChips() {
   const el = $('achips'); if (!el) return;
-  el.innerHTML = agFiles.map((f, i) => `<span class="chip"><span>${esc(f.name)}</span>`
+  el.innerHTML = agFiles.map((f, i) => `<span class="chip">`
+    + (f.url ? `<img src="${f.url}" data-z="${i}" alt="${esc(f.name)}">` : '')
+    + `<span>${esc(f.name)}</span>`
     + `<em>${f.size}</em><button data-i="${i}" aria-label="Remove ${esc(f.name)}">&times;</button></span>`).join('');
   el.querySelectorAll('button').forEach(b => b.onclick = () => {
-    agFiles.splice(+b.dataset.i, 1); agChips();
+    agDropFiles(agFiles.splice(+b.dataset.i, 1)); agChips();
   });
+  el.querySelectorAll('img[data-z]').forEach(im => im.onclick = () => agZoom(im.src));
 }
+/* the preview is the uploaded blob itself, so no second fetch. Tap to close. */
+function agZoom(url) {
+  const o = document.createElement('div');
+  o.className = 'zoom';
+  o.innerHTML = `<img src="${url}">`;
+  o.onclick = () => o.remove();
+  document.body.appendChild(o);
+}
+function agDropFiles(list) { list.forEach(f => { if (f.url) URL.revokeObjectURL(f.url); }); }
 async function agAttach(files) {
   if (!files.length) return;
   if (DEMO) return toast('Demo mode: nothing is uploaded.');
@@ -1702,7 +1722,8 @@ async function agAttach(files) {
     } catch (e) { toast('Upload failed: ' + e.message); return; }
     // the path goes in the message text on purpose (agSend appends it): that IS the
     // whole contract, so nothing in agent_loop or the renderer learns about attachments
-    agFiles.push({ name, path, size: fileSize(blob.size) });
+    agFiles.push({ name, path, size: fileSize(blob.size),
+                   url: /^image\//.test(blob.type) ? URL.createObjectURL(blob) : '' });
     agChips();
   }
   $('chatin').focus();
@@ -1727,7 +1748,7 @@ function closeAgent() {
 async function openThread(t) {
   agT = t; sessionStorage.setItem('pa_thread', t);
   agMsgs = []; agSha = undefined; agText0 = '';
-  agLive = []; agLiveNext = 0; agFiles = []; agChips();
+  agLive = []; agLiveNext = 0; agDropFiles(agFiles); agFiles = []; agChips();
   clearInterval(agTimer); agTimer = null;
   $('atitle').textContent = 'Agent';
   $('abody').innerHTML = `
@@ -1789,7 +1810,7 @@ function agTurns() {
   for (const l of agLive) { if (l.kind === 'done') segs.push([]); else segs[segs.length - 1].push(l); }
   const tail = segs.pop() || [];                  // no `done` yet: still running, goes last
   const ai = agMsgs.filter(m => m.role === 'assistant');
-  const use = segs.filter(s => s.length).slice(-ai.length);
+  const use = ai.length ? segs.filter(s => s.length).slice(-ai.length) : [];   // slice(-0) is the whole array
   const own = {};
   use.forEach((s, i) => { own[ai[ai.length - use.length + i].id] = s; });
   return { own, tail };
@@ -1800,7 +1821,7 @@ function agRender() {
   const { own, tail } = agTurns();
   log.innerHTML = (agMsgs.length
     ? agMsgs.map(m => m.role === 'system' ? `<div class="sysline">${esc(m.text)}</div>`
-      : m.role === 'user' ? `<div class="bubble me">${esc(m.text)}</div>`
+      : m.role === 'user' ? `<div class="bubble me">${userBody(m.text)}</div>`
       : liveBlock(own[m.id], false)
         + `<div class="bubble ai">${window.marked ? marked.parse(m.text || '') : esc(m.text || '')}${
            m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
@@ -1811,6 +1832,35 @@ function agRender() {
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
   showPage();
   const body = $('abody'); if (body) body.scrollTop = body.scrollHeight;
+  attThumbs(log);
+}
+/* An attachment line is a repo path, so a sent message shows the same chip the
+   input showed: thumbnail (fetched once with the app's own token), name, tap to
+   enlarge. Everything else in the message renders as before. */
+const ATT_RE = /^\[attached file, read it at (\S+)\]$/gm;
+const IMG_RE = /\.(png|jpe?g|gif|webp)$/i;
+const attCache = {};
+function userBody(text) {
+  const paths = [];
+  const body = String(text).replace(ATT_RE, (_, p) => { paths.push(p); return ''; }).trim();
+  return (body ? esc(body) : '') + (paths.length
+    ? '<div class="achips sent">' + paths.map(p => '<span class="chip">'
+        + (IMG_RE.test(p) ? `<img data-att="${esc(p)}" alt="">` : '')
+        + `<span>${esc(p.split('/').pop())}</span></span>`).join('') + '</div>'
+    : '');
+}
+async function attThumbs(root) {
+  for (const im of root.querySelectorAll('img[data-att]:not([src])')) {
+    const path = im.dataset.att;
+    if (!attCache[path]) {
+      try {
+        const r = await gh(path, { headers: { 'Accept': 'application/vnd.github.raw+json' } });
+        attCache[path] = URL.createObjectURL(await r.blob());
+      } catch (e) { im.remove(); continue; }
+    }
+    im.src = attCache[path];
+    im.onclick = () => agZoom(im.src);
+  }
 }
 async function agPoll() {
   if (!agentOpen() || agSending) return;
@@ -1885,6 +1935,7 @@ async function agSend() {
   // Only home.json is touched: the job file keeps its gate, which is how the box
   // knows to resume. If the box never picks it up, a reload honestly shows it again.
   else if (/^j-/.test(agT)) await clearHomeGate(agT);
+  if (saved) agDropFiles(sent);
   agSending = false;
   if (!agTimer) agTimer = setInterval(agPoll, 5000);      // a brand-new thread starts polling
 }
