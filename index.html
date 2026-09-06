@@ -364,6 +364,16 @@
     padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   #agent .afoot textarea { flex: 1; max-height: 50vh; border-radius: 18px; padding: 9px 14px; }
   #agent .afoot .primary, #agent .afoot .ghost { border-radius: 18px; padding: 9px 14px; flex-shrink: 0; }
+  /* pending attachments, VS Code style: a strip of chips above the input */
+  #agent .achips { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 0; }
+  #agent .achips:empty { display: none; }
+  #agent .achips .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+    padding: 4px 4px 4px 8px; font-size: 12.5px; }
+  #agent .achips .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #agent .achips .chip em { color: var(--muted); font-style: normal; flex-shrink: 0; }
+  #agent .achips .chip button { border: 0; background: none; color: var(--muted); cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 0 4px; }
   /* which page the next message will carry as context */
   .pgctx { font-size: 12px; color: var(--muted); padding: 0 4px 8px; }
   @media (min-width: 900px) { body.agent-open main { margin-right: var(--agentw, min(94vw, 420px)); } }
@@ -1581,6 +1591,7 @@ function agentShell() {
       <button class="iconbtn" id="aspeak" aria-label="Read replies aloud">${speakOn ? '🔊' : '🔇'}</button>
     </div>
     <div class="abody" id="abody"></div>
+    <div class="achips" id="achips"></div>
     <div class="afoot">
       <input type="file" id="chatfile" multiple style="display:none"
              accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx">
@@ -1651,10 +1662,20 @@ function shrinkImage(file) {
     img.src = url;
   });
 }
+/* Pending attachments live here until Send folds their paths into the message. */
+let agFiles = [];
+const fileSize = b => b < 1e6 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1e6).toFixed(1) + ' MB';
+function agChips() {
+  const el = $('achips'); if (!el) return;
+  el.innerHTML = agFiles.map((f, i) => `<span class="chip"><span>${esc(f.name)}</span>`
+    + `<em>${f.size}</em><button data-i="${i}" aria-label="Remove ${esc(f.name)}">&times;</button></span>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => {
+    agFiles.splice(+b.dataset.i, 1); agChips();
+  });
+}
 async function agAttach(files) {
   if (!files.length) return;
   if (DEMO) return toast('Demo mode: nothing is uploaded.');
-  const ta = $('chatin');
   for (const f of files) {
     let blob = f, name = f.name || 'pasted';   // a pasted screenshot can be nameless
     toast('Uploading ' + name + '…');
@@ -1679,12 +1700,12 @@ async function agAttach(files) {
         message: 'phone: attach ' + name, content: btoa(bin), branch: 'main' }) });
       if (r.status === 409) throw new Error('conflict');
     } catch (e) { toast('Upload failed: ' + e.message); return; }
-    // the path goes in the message text on purpose: that IS the whole contract, so
-    // nothing in agent_loop or the renderer has to learn about attachments
-    ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n' : '')
-             + '[attached file, read it at ' + path + ']';
+    // the path goes in the message text on purpose (agSend appends it): that IS the
+    // whole contract, so nothing in agent_loop or the renderer learns about attachments
+    agFiles.push({ name, path, size: fileSize(blob.size) });
+    agChips();
   }
-  ta.oninput(); ta.focus();
+  $('chatin').focus();
   toast('Attached. Say what to do with it, then Send.');
 }
 /* thread: a thread id, 'new' for a fresh one, or nothing to reopen the last. */
@@ -1706,7 +1727,7 @@ function closeAgent() {
 async function openThread(t) {
   agT = t; sessionStorage.setItem('pa_thread', t);
   agMsgs = []; agSha = undefined; agText0 = '';
-  agLive = []; agLiveNext = 0;
+  agLive = []; agLiveNext = 0; agFiles = []; agChips();
   clearInterval(agTimer); agTimer = null;
   $('atitle').textContent = 'Agent';
   $('abody').innerHTML = `
@@ -1832,9 +1853,12 @@ function agGrip(grip) {
   };
 }
 async function agSend() {
-  const ta = $('chatin'); const body = ta.value.trim();
-  if (!body || agSending) return;
-  agSending = true; ta.value = ''; ta.style.height = '';
+  const ta = $('chatin'); const typed = ta.value.trim();
+  if ((!typed && !agFiles.length) || agSending) return;
+  const sent = agFiles;
+  const body = [typed].concat(sent.map(f => '[attached file, read it at ' + f.path + ']'))
+                      .filter(Boolean).join('\n');
+  agSending = true; ta.value = ''; ta.style.height = ''; agFiles = []; agChips();
   // the page rides with the message: agent_loop names it in the prompt
   const msg = chatMsg('user', body, { model: selModel, effort: selEffort, page: pageRef() });
   agMsgs = agMsgs.concat(msg); agRender();
@@ -1852,7 +1876,11 @@ async function agSend() {
     if (!f) { toast('Send failed: ' + (err ? err.message : 'conflict')); break; }
     agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text).concat(msg); agRender();
   }
-  if (!saved) { agMsgs = agMsgs.filter(m => m.id !== msg.id); agRender(); toast('Not sent. Try again.'); }
+  if (!saved) {
+    agMsgs = agMsgs.filter(m => m.id !== msg.id); agRender();
+    ta.value = typed; ta.oninput(); agFiles = sent; agChips();   // uploads are committed, don't lose them
+    toast('Not sent. Try again.');
+  }
   // In a build's thread that message IS the gate answer, so stop the card asking.
   // Only home.json is touched: the job file keeps its gate, which is how the box
   // knows to resume. If the box never picks it up, a reload honestly shows it again.
