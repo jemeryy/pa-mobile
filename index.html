@@ -1617,6 +1617,14 @@ function agentShell() {
   if (SpeechRec && $('chatmic')) $('chatmic').onclick = () => agMic();
   $('chatclip').onclick = () => $('chatfile').click();
   $('chatfile').onchange = e => agAttach([...e.target.files]).finally(() => { e.target.value = ''; });
+  // Paste a screenshot or a file straight into the box, same as the paperclip.
+  // A text paste carries no files, so it falls through untouched.
+  ta.addEventListener('paste', e => {
+    const files = [...(e.clipboardData ? e.clipboardData.files : [])];
+    if (!files.length) return;
+    e.preventDefault();
+    agAttach(files);
+  });
   return el;
 }
 /* Attachments: the file is committed into the repo and the chat message names its
@@ -1648,8 +1656,8 @@ async function agAttach(files) {
   if (DEMO) return toast('Demo mode: nothing is uploaded.');
   const ta = $('chatin');
   for (const f of files) {
-    toast('Uploading ' + f.name + '…');
-    let blob = f, name = f.name;
+    let blob = f, name = f.name || 'pasted';   // a pasted screenshot can be nameless
+    toast('Uploading ' + name + '…');
     if (/^image\//.test(f.type)) {
       const small = await shrinkImage(f);
       if (small) { blob = small; name = name.replace(/\.[^.]*$/, '') + '.jpg'; }
