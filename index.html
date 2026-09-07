@@ -1821,12 +1821,29 @@ function agRender() {
            m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
     + liveBlock(tail, true)
-    + (waiting ? '<div class="sysline">Sent. The reply lands here, usually under a minute.</div>' : '');
+    + (waiting ? `<div class="sysline">Sent. The reply lands here, usually under a minute.${
+        boxTok ? ' <button class="ghost" id="agstop" style="padding:3px 9px;font-size:12px;margin-left:6px">Stop</button>' : ''}</div>` : '');
   if ($('actx')) $('actx').innerHTML = ctxBar(agMsgs);
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
   showPage();
   const body = $('abody'); if (body) body.scrollTop = body.scrollHeight;
+  if ($('agstop')) $('agstop').onclick = agStop;
   attThumbs(log);
+}
+/* Stop the turn the box is running for this chat, the way Escape does in Claude
+   Code. Over HTTP and not through the git mailbox (which is how a build's Stop
+   button works): a chat turn runs inline in the box's loop, so a stop committed
+   to the mailbox is only read after the turn it was stopping has finished. The
+   box keeps the dead turn's session, so his next message here carries on from
+   where it stopped instead of starting over. */
+async function agStop() {
+  if (!boxTok || !agT) return;
+  try {
+    const r = await fetch(`${BOX}/stop?job=${encodeURIComponent(agT)
+        }&token=${encodeURIComponent(boxTok)}`, { method: 'POST' });
+    const d = r.ok ? await r.json() : {};
+    toast(d.stopped ? 'Stopped. Say what to do instead.' : 'Nothing was running.');
+  } catch (e) { toast('Could not reach the box.'); }
 }
 /* An attachment line is a repo path, so a sent message shows the same chip the
    input showed: thumbnail (fetched once with the app's own token), name, tap to
