@@ -635,6 +635,7 @@ async function homeView() {
     <div class="gdate">${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}</div>
     <div id="alerts"></div>
     <div id="todaycard"></div>
+    <div id="dues"></div>
     <div id="dash">${skels(3)}</div>
     <div class="rowlist" style="margin-top:14px">
       <a href="#/weekly"><span class="ric">&#128197;</span><span class="rtx">This week's plan</span><span class="chev">${ICONS.chev}</span></a>
@@ -643,6 +644,7 @@ async function homeView() {
     <div class="sect">Personal</div>
     <div id="pages">${skels(4)}</div>`;
   renderTodayCard();
+  renderDues();
   renderDashboard();
   try {
     const pages = JSON.parse((await loadFile('phone/pages.json')).text);
@@ -962,6 +964,65 @@ async function gateView(id) {
       history.length > 1 ? history.back() : (location.hash = '');
     } catch (e) { toast(e.message); btn.disabled = false; }
   }
+}
+/* Coursework checklist on home. Truth is mailbox/state/uni.json `deadlines`
+   (the agent writes the list, a tick writes back here), so nothing has to run to
+   retire a row: anything dated before today, or ticked, simply stops rendering.
+   Capped so a full term of deadlines cannot push the rest of home off screen. */
+const DUE_CAP = 8;
+function dueWhen(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const days = Math.round((d - t) / 864e5);
+  const lbl = `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  return days === 0 ? lbl + ' · today' : days === 1 ? lbl + ' · tomorrow'
+       : days <= 7 ? lbl + ` · in ${days} days` : lbl;
+}
+let dues = null;                 // the uni deadlines, in memory, so a tick is instant
+async function renderDues() {
+  if (!$('dues')) return;
+  try { dues = (JSON.parse((await loadFile(STATE_PATH('uni'))).text).deadlines) || []; }
+  catch (e) { return; }                       // no uni page yet: show nothing
+  drawDues();
+}
+function drawDues() {
+  const el = $('dues'); if (!el) return;
+  const today = dkey(new Date());
+  const live = dues.filter(d => !d.done && d.date >= today)
+                   .sort((a, b) => a.date.localeCompare(b.date));
+  if (!live.length) { el.innerHTML = ''; return; }
+  const shown = live.slice(0, DUE_CAP);
+  el.innerHTML = `<div class="sect">Coming up${
+      live.length > shown.length ? ` — next ${shown.length} of ${live.length}` : ''}</div>
+    <div class="rowlist">${shown.map(d => `<div>
+      <button class="lrow" data-due="${esc(d.id)}" style="flex:1;min-width:0">
+        <span class="lbox">${ICONS.check || '✓'}</span>
+        <span class="ltx two">${esc(d.what)}<span class="rsub">${
+          esc(dueWhen(d.date))} · ${esc(d.course)}</span></span></button></div>`).join('')}</div>`;
+  el.querySelectorAll('[data-due]').forEach(b => { b.onclick = () => tickDue(b.dataset.due); });
+}
+/* Tick one off. Optimistic like the lesson rows; a failed write puts it back.
+   The file is re-read before writing so a tick never clobbers whatever the agent
+   has since added to the uni page. */
+const dueBusy = new Set();
+async function tickDue(id) {
+  const it = dues.find(d => d.id === id); if (!it) return;
+  if (dueBusy.has(id)) return toast('Still saving that one.');
+  dueBusy.add(id);
+  it.done = true;
+  drawDues();
+  try {
+    const f = await loadFile(STATE_PATH('uni'));
+    const st = JSON.parse(f.text);
+    const row = (st.deadlines || []).find(d => d.id === id);
+    if (!row) throw new Error('That one is already gone. Reload.');
+    row.done = true;
+    const sha = await saveFile(STATE_PATH('uni'), JSON.stringify(st, null, 2) + '\n',
+                               f.sha, 'phone: tick deadline');
+    if (!sha) throw new Error('The agent changed the uni page while you were looking. Reload.');
+    toast('Done.');
+  } catch (e) { it.done = false; drawDues(); toast(e.message); }
+  finally { dueBusy.delete(id); }
 }
 async function renderDashboard() {
   const el = $('dash'); if (!el) return;
