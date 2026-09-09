@@ -96,6 +96,16 @@
   .lrow.done .lbox { background: #16a34a; border-color: #16a34a; color: #fff; }
   .lrow.done .ltx { color: var(--muted); }
   .lrow[disabled] { opacity: .55; }
+  .rowlist > .drow { gap: 10px; align-items: flex-start; padding: 11px 13px; }
+  .drow .lbox { margin-top: 1px; }
+  .drow .ddate { width: 46px; flex-shrink: 0; color: var(--muted); font-size: 13px;
+    font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.35;
+    padding-top: 1px; }
+  .drow .ltx { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 500;
+    line-height: 1.35; }
+  .drow.late .ddate { color: #dc2626; }
+  .drow.done .ddate, .drow.done .rsub { opacity: .55; }
+  .drow.done .ltx { text-decoration: line-through; color: var(--muted); }
   .sect { font-size: 13px; font-weight: 650; color: var(--muted);
     margin: 22px 4px 8px; }
   .muted { color: var(--muted); font-size: 14px; }
@@ -969,14 +979,9 @@ async function gateView(id) {
    (the agent writes the list, a tick writes back here), so nothing has to run to
    retire a row: anything dated before today, or ticked, simply stops rendering.
    Capped so a full term of deadlines cannot push the rest of home off screen. */
-const DUE_CAP = 8;
 function dueWhen(iso) {
   const d = new Date(iso + 'T00:00:00');
-  const t = new Date(); t.setHours(0, 0, 0, 0);
-  const days = Math.round((d - t) / 864e5);
-  const lbl = `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
-  return days === 0 ? lbl + ' · today' : days === 1 ? lbl + ' · tomorrow'
-       : days <= 7 ? lbl + ` · in ${days} days` : lbl;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 let dues = null;                 // the uni deadlines, in memory, so a tick is instant
 async function renderDues() {
@@ -985,43 +990,48 @@ async function renderDues() {
   catch (e) { return; }                       // no uni page yet: show nothing
   drawDues();
 }
+/* A row leaves the list only once it is BOTH past and ticked. So ticking early
+   keeps it visible (with a line through it) until the date goes by, and a
+   deadline you never ticked stays up, in red, instead of quietly vanishing. */
 function drawDues() {
   const el = $('dues'); if (!el) return;
   const today = dkey(new Date());
-  const live = dues.filter(d => !d.done && d.date >= today)
+  const live = dues.filter(d => !(d.done && d.date < today))
                    .sort((a, b) => a.date.localeCompare(b.date));
   if (!live.length) { el.innerHTML = ''; return; }
-  const shown = live.slice(0, DUE_CAP);
-  el.innerHTML = `<div class="sect">Coming up${
-      live.length > shown.length ? ` — next ${shown.length} of ${live.length}` : ''}</div>
-    <div class="rowlist">${shown.map(d => `<div>
-      <button class="lrow" data-due="${esc(d.id)}" style="flex:1;min-width:0">
+  el.innerHTML = `<div class="sect">Coming up</div>
+    <div class="rowlist">${live.map(d => {
+      const late = d.date < today;
+      return `<button class="lrow drow${d.done ? ' done' : ''}${late ? ' late' : ''}"
+        data-due="${esc(d.id)}">
         <span class="lbox">${ICONS.check || '✓'}</span>
-        <span class="ltx two">${esc(d.what)}<span class="rsub">${
-          esc(dueWhen(d.date))} · ${esc(d.course)}</span></span></button></div>`).join('')}</div>`;
+        <span class="ddate">${esc(dueWhen(d.date))}</span>
+        <span class="ltx">${esc(d.what)}<span class="rsub">${esc(d.course)}</span></span>
+      </button>`;
+    }).join('')}</div>`;
   el.querySelectorAll('[data-due]').forEach(b => { b.onclick = () => tickDue(b.dataset.due); });
 }
-/* Tick one off. Optimistic like the lesson rows; a failed write puts it back.
-   The file is re-read before writing so a tick never clobbers whatever the agent
-   has since added to the uni page. */
+/* Tick one on or off. Optimistic like the lesson rows; a failed write puts it
+   back. The file is re-read before writing so a tick never clobbers whatever the
+   agent has since added to the uni page. */
 const dueBusy = new Set();
 async function tickDue(id) {
   const it = dues.find(d => d.id === id); if (!it) return;
   if (dueBusy.has(id)) return toast('Still saving that one.');
   dueBusy.add(id);
-  it.done = true;
+  const was = !!it.done;
+  it.done = !was;
   drawDues();
   try {
     const f = await loadFile(STATE_PATH('uni'));
     const st = JSON.parse(f.text);
     const row = (st.deadlines || []).find(d => d.id === id);
     if (!row) throw new Error('That one is already gone. Reload.');
-    row.done = true;
+    row.done = it.done;
     const sha = await saveFile(STATE_PATH('uni'), JSON.stringify(st, null, 2) + '\n',
                                f.sha, 'phone: tick deadline');
     if (!sha) throw new Error('The agent changed the uni page while you were looking. Reload.');
-    toast('Done.');
-  } catch (e) { it.done = false; drawDues(); toast(e.message); }
+  } catch (e) { it.done = was; drawDues(); toast(e.message); }
   finally { dueBusy.delete(id); }
 }
 async function renderDashboard() {
@@ -1666,7 +1676,7 @@ function agentShell() {
              accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx">
       <button class="ghost" id="chatclip" aria-label="Attach a file">&#128206;</button>
       ${SpeechRec ? '<button class="ghost" id="chatmic" aria-label="Speak">&#127908;</button>' : ''}
-      <textarea id="chatin" rows="1" enterkeyhint="send" placeholder="Ask about this page…"></textarea>
+      <textarea id="chatin" rows="1" enterkeyhint="${TOUCH ? 'enter' : 'send'}" placeholder="Ask about this page…"></textarea>
       <button class="primary" id="chatsend">Send</button>
     </div>`;
   document.body.appendChild(el);
@@ -1682,10 +1692,11 @@ function agentShell() {
   $('chatsend').onclick = agSend;
   const ta = $('chatin');
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight / 2) + 'px'; };
-  // Hardware keyboard: Enter sends, shift+Enter makes a newline. A phone's
-  // on-screen keyboard reports keydown as 229 / Unidentified so this never fires
-  // there: Enter just makes a newline and only the send button sends.
+  // Hardware keyboard: Enter sends, shift+Enter makes a newline. On a touch
+  // device Enter always makes a newline (some phone keyboards do report a real
+  // Enter keydown), so only the send button sends there.
   ta.onkeydown = e => {
+    if (TOUCH) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.isComposing) { e.preventDefault(); agSend(); }
   };
   if (SpeechRec && $('chatmic')) $('chatmic').onclick = () => agMic();
@@ -2101,6 +2112,8 @@ async function showChats() {
     };
   }
 }
+// Phone/tablet: no hover and a coarse pointer. Used to keep Enter as a newline.
+const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches;
 const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let agMicOn = false;
