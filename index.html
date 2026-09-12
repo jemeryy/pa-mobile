@@ -1606,17 +1606,18 @@ const CHAT_MODELS = [['Sonnet 4.6', 'claude-sonnet-4-6'], ['Sonnet 5', 'claude-s
   // The other subscription (see run_codex). Slugs and the reasoning levels each
   // one accepts come from ~/.codex/models_cache.json; a model offered an effort
   // it does not support fails the whole turn, so the list is per model.
-  ['Codex 5.6-Sol', 'codex:gpt-5.6-sol'], ['Codex 5.6-Terra', 'codex:gpt-5.6-terra'],
-  ['Codex 5.6-Luna', 'codex:gpt-5.6-luna'], ['Codex 5.5', 'codex:gpt-5.5'],
-  ['Codex 5.4', 'codex:gpt-5.4'], ['Codex 5.4-Mini', 'codex:gpt-5.4-mini']];
+  ['GPT-6 Astra', 'codex:gpt-6-astra'],
+  ['GPT-5.6 Sol', 'codex:gpt-5.6-sol'], ['GPT-5.6 Terra', 'codex:gpt-5.6-terra'],
+  ['GPT-5.6 Luna', 'codex:gpt-5.6-luna'], ['GPT-5.5', 'codex:gpt-5.5'],
+  ['GPT-5.3 Codex Spark', 'codex:gpt-5.3-codex-spark']];
 const CHAT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CODEX_EFFORTS = {
+  'codex:gpt-6-astra': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   'codex:gpt-5.6-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   'codex:gpt-5.6-terra': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   'codex:gpt-5.6-luna': ['low', 'medium', 'high', 'xhigh', 'max'],
   'codex:gpt-5.5': ['low', 'medium', 'high', 'xhigh'],
-  'codex:gpt-5.4': ['low', 'medium', 'high', 'xhigh'],
-  'codex:gpt-5.4-mini': ['low', 'medium', 'high', 'xhigh'],
+  'codex:gpt-5.3-codex-spark': ['low', 'medium', 'high', 'xhigh'],
 };
 const effortsFor = m => CODEX_EFFORTS[m] || CHAT_EFFORTS;
 const effortSelect = () => optSelect('opteffort',
@@ -1625,7 +1626,15 @@ function bindEffort() {
   $('opteffort').onchange = e => { selEffort = e.target.value; localStorage.setItem('pa_effort', selEffort); };
 }
 let selModel = localStorage.getItem('pa_model') || 'claude-sonnet-4-6';
+// Retired GPT choices should stay on the ChatGPT subscription after an update.
+if (!CHAT_MODELS.some(([, value]) => value === selModel)) {
+  selModel = selModel.startsWith('codex') ? 'codex:gpt-5.6-sol' : 'claude-sonnet-4-6';
+  localStorage.setItem('pa_model', selModel);
+}
 let selEffort = localStorage.getItem('pa_effort') || 'medium';
+if (!effortsFor(selModel).includes(selEffort)) {
+  selEffort = 'medium'; localStorage.setItem('pa_effort', selEffort);
+}
 function optSelect(id, pairs, cur) {
   return `<select id="${id}">` + pairs.map(([lbl, val]) =>
     `<option value="${val}"${val === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('') + '</select>';
