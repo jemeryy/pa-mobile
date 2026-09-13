@@ -436,6 +436,10 @@ function jobTitle(j, here) {
   const student = p[1].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   return label.toLowerCase().includes(student.toLowerCase()) ? label : student + ' ' + label;
 }
+function jobModel(j) {
+  if (j.model) return CHAT_MODELS.find(([, model]) => model === j.model)?.[0] || j.model;
+  return j.provider ? (j.provider === 'gpt' ? 'GPT' : 'Claude') + ' skill default' : '';
+}
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const ICONS = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
@@ -749,6 +753,7 @@ function newJob(o) {
   // a job's thread is its own id (mirrors agent_loop.create_job): the build's
   // questions, his answers and the result all land in one chat he can read back
   return { id, skill: o.skill, args: o.args || {}, prompt: o.prompt || null,
+    provider: selModel.startsWith('codex') ? 'gpt' : 'claude', effort: selEffort,
     project: proj || null, label: o.label || o.skill, state: 'queued',
     thread: id, created: nowIso(), updated: nowIso() };
 }
@@ -913,6 +918,7 @@ function gateCards(list) {
     const g = j.gate || {};
     return `<div class="card flag">
       <div class="ttl">${esc(jobTitle(j))}</div>
+      ${jobModel(j) ? `<div class="muted">${esc(jobModel(j))}</div>` : ''}
       <div class="det">${esc(g.question || j.note || 'Waiting for your check.')}</div>
       <div class="actrow" style="margin:10px 0 0">
         <a class="primary" style="flex:1;text-align:center"
@@ -1222,7 +1228,8 @@ async function projView(key) {
     // each row opens that build's chat: the gate it asked, what you said, the result
     if (jobs.length)
       parts.push(`<div class="sect">Work</div><div class="joblist">${jobs.map((j, i) =>
-        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(jobTitle(j, key))}</span>${
+        `<div data-jchat="${i}" style="cursor:pointer"><span class="jl">${esc(jobTitle(j, key))}${
+          jobModel(j) ? `<br><small class="muted">${esc(jobModel(j))}</small>` : ''}</span>${
           LIVE.includes(j.state)      // anything not finished can be killed, gate included
             ? `<button class="ghost" data-jstop="${i}" style="padding:5px 10px;font-size:13px;margin-right:8px">Stop</button>`
             : ''}${jobChip(j.state)}</div>`).join('')}</div>`);
