@@ -489,10 +489,21 @@ async function gh(path, opts = {}) {
   opts.headers = Object.assign({
     'Authorization': 'Bearer ' + token,
     'Accept': 'application/vnd.github+json',
+    ...(opts.body ? {'Content-Type': 'application/json'} : {}),
   }, opts.headers || {});
   const r = await fetch(API + encodeURI(path).replace(/#/g, '%23') + '?ref=main&t=' + Date.now(), opts);
-  if (r.status === 401) { localStorage.removeItem('pa_token'); token = ''; route(); throw new Error('GitHub token rejected'); }
-  if (!r.ok && r.status !== 409) throw new Error('GitHub ' + r.status + ' on ' + path);
+  if (r.status === 401) {
+    localStorage.removeItem('pa_token'); token = ''; route();
+    const err = new Error('GitHub token rejected'); err.status = 401; throw err;
+  }
+  if (!r.ok && r.status !== 409) {
+    const detail = await r.json().catch(() => ({}));
+    const err = new Error(detail.message || ('GitHub ' + r.status + ' on ' + path));
+    err.status = r.status;
+    err.retryable = r.status >= 500 || [408, 422, 429].includes(r.status)
+      || (r.status === 403 && /rate limit|abuse/i.test(err.message));
+    throw err;
+  }
   return r;
 }
 function b64decode(b64) {
@@ -1696,6 +1707,10 @@ function agentShell() {
       <button class="primary" id="chatsend">Send</button>
     </div>`;
   document.body.appendChild(el);
+  const sendError = document.createElement('div');
+  sendError.id = 'asenderror'; sendError.className = 'err'; sendError.hidden = true;
+  sendError.setAttribute('role', 'alert'); sendError.style.cssText = 'padding:0 14px 8px;font-size:13px';
+  el.insertBefore(sendError, $('achips'));
   $('aclose').onclick = closeAgent;
   agGrip($('agentgrip'));
   $('alist').onclick = showChats;
@@ -1828,6 +1843,8 @@ function closeAgent() {
   if (window.speechSynthesis) speechSynthesis.cancel();
 }
 async function openThread(t) {
+  if (agSending) { toast('Wait for this message to finish sending.'); return; }
+  $('asenderror').hidden = true;
   agT = t; sessionStorage.setItem('pa_thread', t);
   agMsgs = []; agSha = undefined; agText0 = '';
   agLive = []; agLiveNext = 0; agDropFiles(agFiles); agFiles = []; agChips();
@@ -1909,7 +1926,7 @@ function agRender() {
            m.by === 'gemma' ? '<span class="by">routed locally</span>' : ''}</div>`).join('')
     : '<div class="empty">Ask about this page, or anything else.</div>')
     + liveBlock(tail, true)
-    + (waiting ? `<div class="sysline">Sent. The reply lands here, usually under a minute.${
+    + (waiting ? `<div class="sysline">${agSending ? 'Sending…' : 'Sent. The reply lands here, usually under a minute.'}${
         boxTok ? ' <button class="ghost" id="agstop" style="padding:3px 9px;font-size:12px;margin-left:6px">Stop</button>' : ''}</div>` : '');
   if ($('actx')) $('actx').innerHTML = ctxBar(agMsgs);
   if (agMsgs.length) $('atitle').textContent = chatTitle(agMsgs);
@@ -2001,6 +2018,39 @@ function agGrip(grip) {
     };
   };
 }
+/* A PUT may have landed even when its response is lost. Read before retrying and
+   recognise the message id, rather than appending a duplicate or claiming it
+   failed. Only a 404 means a new chat; failed reads must never erase history. */
+async function appendChatMessage(thread, msg) {
+  const path = chatPath(thread);
+  let failure;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      let f;
+      try { f = await loadFile(path); }
+      catch (e) { if (e.status !== 404) throw e; }
+      if (f && chatParse(f.text).some(m => m.id === msg.id)) return f;
+      const base = f ? f.text + (f.text && !f.text.endsWith('\n') ? '\n' : '') : '';
+      const text = base + JSON.stringify(msg) + '\n';
+      const sha = await saveFile(path, text, f?.sha, 'phone: chat message');
+      if (sha) return {sha, text};
+      failure = new Error('The chat changed while saving. Please try again.');
+    } catch (e) {
+      failure = e;
+      if (e.status && !e.retryable) throw e;
+    }
+    if (attempt < 7) await new Promise(resolve => setTimeout(resolve, Math.min(500 * 2 ** attempt, 4000)));
+  }
+  throw failure;
+}
+function chatSendError(err) {
+  if (err.status === 403 && !err.retryable)
+    return 'Not sent: GitHub denied write access. Check your workspace token in Settings.';
+  if (!token) return 'Not sent: reconnect your workspace with a valid GitHub token.';
+  if (!err.status && /fetch|network|load failed/i.test(err.message))
+    return 'Could not confirm sending. Check your connection and try again.';
+  return 'Send failed: ' + err.message;
+}
 async function agSend() {
   const ta = $('chatin'); const typed = ta.value.trim();
   if ((!typed && !agFiles.length) || agSending) return;
@@ -2008,27 +2058,23 @@ async function agSend() {
   const body = [typed].concat(sent.map(f => '[attached file, read it at ' + f.path + ']'))
                       .filter(Boolean).join('\n');
   agSending = true; ta.value = ''; ta.style.height = ''; agFiles = []; agChips();
+  $('asenderror').hidden = true;
   // the page rides with the message: agent_loop names it in the prompt
   const msg = chatMsg('user', body, { model: selModel, effort: selEffort, page: pageRef() });
   agMsgs = agMsgs.concat(msg); agRender();
-  if (DEMO) { agSending = false; return; }
-  const path = chatPath(agT), line = JSON.stringify(msg) + '\n';
+  if (DEMO) { agSending = false; agRender(); return; }
   let saved = false;
-  for (let attempt = 0; attempt < 3 && !saved; attempt++) {
-    const base = agText0 && !agText0.endsWith('\n') ? agText0 + '\n' : agText0;
-    let newSha = null, err = null;
-    try { newSha = await saveFile(path, base + line, agSha, 'phone: chat message'); }
-    catch (e) { err = e; }
-    if (newSha) { agSha = newSha; agText0 = base + line; saved = true; break; }
-    // 409 stale sha or 422 concurrent create: the agent appended while we typed.
-    const f = await loadFile(path).catch(() => null);
-    if (!f) { toast('Send failed: ' + (err ? err.message : 'conflict')); break; }
-    agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text).concat(msg); agRender();
-  }
+  let failure;
+  try {
+    const f = await appendChatMessage(agT, msg);
+    agSha = f.sha; agText0 = f.text; agMsgs = chatParse(f.text); agRender(); saved = true;
+  } catch (e) { failure = e; }
   if (!saved) {
     agMsgs = agMsgs.filter(m => m.id !== msg.id); agRender();
     ta.value = typed; ta.oninput(); agFiles = sent; agChips();   // uploads are committed, don't lose them
-    toast('Not sent. Try again.');
+    const explanation = chatSendError(failure);
+    $('asenderror').textContent = explanation; $('asenderror').hidden = false;
+    toast(explanation);
   }
   // In a build's thread that message IS the gate answer, so stop the card asking.
   // Only home.json is touched: the job file keeps its gate, which is how the box
@@ -2036,6 +2082,7 @@ async function agSend() {
   else if (/^j-/.test(agT)) await clearHomeGate(agT);
   if (saved) agDropFiles(sent);
   agSending = false;
+  agRender();
   if (!agTimer) agTimer = setInterval(agPoll, 5000);      // a brand-new thread starts polling
 }
 /* Start his reply for him (the gate answer he picked). Waits for the panel's own
